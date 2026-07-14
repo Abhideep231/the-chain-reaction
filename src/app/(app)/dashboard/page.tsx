@@ -1,11 +1,11 @@
 import type { Metadata } from "next"
 
-import { PlaceholderPage } from "@/components/layout/placeholder-page"
+import { DashboardWorkspace } from "@/components/dashboard/dashboard-workspace"
 
 export const metadata: Metadata = {
   title: "Dashboard | The Chain Reaction",
 }
 
 export default function DashboardPage() {
-  return <PlaceholderPage title="Dashboard" />
+  return <DashboardWorkspace />
 }
