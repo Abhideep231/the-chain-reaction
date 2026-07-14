@@ -16,7 +16,7 @@ export default function AppShellLayout({
         <UtilityPanelProvider>
           <SiteHeader />
           <div className="flex flex-1 overflow-hidden">
-            <div className="flex min-h-0 flex-1 flex-col gap-4 p-4">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 p-4">
               {children}
             </div>
             <UtilityPanel />

@@ -1,4 +1,6 @@
-export type ConfidenceLevel = "high" | "medium" | "low"
+export type { ConfidenceLevel } from "@/types/shared"
+
+import type { ConfidenceLevel, KeyValueItem } from "@/types/shared"
 
 export interface Citation {
   id: string
@@ -16,15 +18,10 @@ export interface RetrievedDocument {
   matchScore: number
 }
 
-export interface AnswerParameter {
-  label: string
-  value: string
-}
-
 export interface EngineeringAnswer {
   summary: string
   confidence: ConfidenceLevel
-  parameters?: AnswerParameter[]
+  parameters?: KeyValueItem[]
   citations: Citation[]
   retrievedDocuments: RetrievedDocument[]
 }

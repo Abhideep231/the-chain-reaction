@@ -1,7 +1,7 @@
 import { FileTextIcon } from "lucide-react"
 
-import { ConfidenceIndicator } from "@/components/chat/answer-card"
 import { CitationCard } from "@/components/chat/citation-card"
+import { ConfidenceIndicator } from "@/components/shared/confidence-indicator"
 import type { EngineeringAnswer } from "@/types/chat"
 
 export function SourcePanel({ answer }: { answer?: EngineeringAnswer }) {

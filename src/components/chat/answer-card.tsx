@@ -1,69 +1,6 @@
-import { CheckCircle2Icon, CircleAlertIcon, CircleHelpIcon } from "lucide-react"
-
-import { cn } from "@/lib/utils"
-import type { ConfidenceLevel, EngineeringAnswer } from "@/types/chat"
-
-const confidenceConfig: Record<
-  ConfidenceLevel,
-  { label: string; icon: typeof CheckCircle2Icon; className: string }
-> = {
-  high: {
-    label: "High confidence",
-    icon: CheckCircle2Icon,
-    className:
-      "border-emerald-600/20 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400",
-  },
-  medium: {
-    label: "Medium confidence",
-    icon: CircleHelpIcon,
-    className:
-      "border-amber-600/20 bg-amber-600/10 text-amber-700 dark:text-amber-400",
-  },
-  low: {
-    label: "Low confidence",
-    icon: CircleAlertIcon,
-    className:
-      "border-destructive/20 bg-destructive/10 text-destructive",
-  },
-}
-
-export function ConfidenceIndicator({
-  confidence,
-  className,
-}: {
-  confidence?: ConfidenceLevel
-  className?: string
-}) {
-  if (!confidence) {
-    return (
-      <span
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground",
-          className
-        )}
-      >
-        <CircleHelpIcon className="size-3.5" />
-        Awaiting analysis
-      </span>
-    )
-  }
-
-  const config = confidenceConfig[confidence]
-  const Icon = config.icon
-
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
-        config.className,
-        className
-      )}
-    >
-      <Icon className="size-3.5" />
-      {config.label}
-    </span>
-  )
-}
+import { ConfidenceIndicator } from "@/components/shared/confidence-indicator"
+import { KeyValueList } from "@/components/shared/key-value-list"
+import type { EngineeringAnswer } from "@/types/chat"
 
 export function AnswerCard({ answer }: { answer: EngineeringAnswer }) {
   return (
@@ -78,19 +15,7 @@ export function AnswerCard({ answer }: { answer: EngineeringAnswer }) {
       </p>
 
       {answer.parameters && answer.parameters.length > 0 && (
-        <div className="rounded-md border bg-muted/40">
-          <dl className="divide-y divide-border">
-            {answer.parameters.map((parameter) => (
-              <div
-                key={parameter.label}
-                className="flex items-center justify-between gap-4 px-3 py-2 text-sm"
-              >
-                <dt className="text-muted-foreground">{parameter.label}</dt>
-                <dd className="font-medium tabular-nums">{parameter.value}</dd>
-              </div>
-            ))}
-          </dl>
-        </div>
+        <KeyValueList items={answer.parameters} />
       )}
 
       {answer.citations.length > 0 && (
