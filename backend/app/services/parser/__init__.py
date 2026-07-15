@@ -1,1 +1,1 @@
-"""PDF parsing service. Implemented in a future sprint."""
+"""PDF parsing service — see pdf_parser.py."""
