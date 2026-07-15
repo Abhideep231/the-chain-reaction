@@ -1,0 +1,26 @@
+# virtual environment
+venv/
+.venv/
+
+# byte-compiled
+__pycache__/
+*.py[cod]
+*$py.class
+
+# distribution / packaging
+*.egg-info/
+build/
+dist/
+
+# env files (the root .gitignore's `.env*` rule would also catch the
+# template below, so explicitly un-ignore it)
+.env
+!.env.example
+
+# local data (uploads, vector db) — placeholders only, populated in future sprints
+data/
+
+# tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
