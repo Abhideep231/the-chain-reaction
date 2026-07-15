@@ -43,9 +43,10 @@ class Settings(BaseSettings):
     claude_api_key: str | None = None
     openai_api_key: str | None = None
 
-    # Storage (placeholders — populated in future sprints)
+    # Storage (vector_db_path is a placeholder — populated in a future sprint)
     vector_db_path: str = "./data/chroma"
     upload_dir: str = "./data/uploads"
+    max_upload_size_mb: int = 25
 
 
 @lru_cache

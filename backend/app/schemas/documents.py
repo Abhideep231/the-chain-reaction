@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel
 
+from app.schemas.pdf import PdfParseResult
+
 
 class DocumentSummary(BaseModel):
     id: str
@@ -24,3 +26,10 @@ class DocumentUploadResponse(BaseModel):
     id: str
     filename: str
     status: str
+
+
+class DocumentUploadResult(BaseModel):
+    id: str
+    filename: str
+    status: str
+    parse_result: PdfParseResult
