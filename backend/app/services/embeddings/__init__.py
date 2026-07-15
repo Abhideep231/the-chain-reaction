@@ -1,1 +1,1 @@
-"""Embedding generation service. Implemented in a future sprint."""
+"""Embedding generation service — see embedding_service.py."""

@@ -1,10 +1,12 @@
 """Documents (Knowledge Library) routes.
 
-GET/POST /documents remain placeholders (no embeddings or storage yet
-— those are implemented in a future sprint). POST /documents/upload
-validates and parses an uploaded PDF via the parser service. POST
+GET/POST /documents remain placeholders (no vector storage yet — that
+is implemented in a future sprint). POST /documents/upload validates
+and parses an uploaded PDF via the parser service. POST
 /documents/chunk splits an already-parsed document into overlapping
-text chunks via the chunker service.
+text chunks via the chunker service. POST /documents/embed generates
+OpenAI embeddings for an already-chunked document via the embedding
+service; embeddings are returned in memory only, never persisted.
 """
 
 import uuid
@@ -25,8 +27,32 @@ from app.schemas.documents import (
 from app.services.chunker.chunker import chunk_document
 from app.services.chunker.exceptions import ChunkingError
 from app.services.chunker.models import ChunkingResult
+from app.services.embeddings.embedding_service import generate_embeddings
+from app.services.embeddings.exceptions import (
+    EmbeddingApiError,
+    EmbeddingAuthenticationError,
+    EmbeddingError,
+    EmbeddingRateLimitError,
+    EmbeddingTimeoutError,
+    EmptyChunkListError,
+    InvalidChunkDataError,
+    InvalidModelError,
+    MissingApiKeyError,
+)
+from app.services.embeddings.models import EmbeddingResult
 from app.services.parser.exceptions import PdfParsingError
 from app.services.parser.pdf_parser import parse_pdf
+
+_EMBEDDING_ERROR_STATUS: dict[type[EmbeddingError], int] = {
+    EmptyChunkListError: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    InvalidChunkDataError: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    MissingApiKeyError: status.HTTP_500_INTERNAL_SERVER_ERROR,
+    InvalidModelError: status.HTTP_500_INTERNAL_SERVER_ERROR,
+    EmbeddingAuthenticationError: status.HTTP_500_INTERNAL_SERVER_ERROR,
+    EmbeddingRateLimitError: status.HTTP_429_TOO_MANY_REQUESTS,
+    EmbeddingTimeoutError: status.HTTP_504_GATEWAY_TIMEOUT,
+    EmbeddingApiError: status.HTTP_502_BAD_GATEWAY,
+}
 
 router = APIRouter(tags=["documents"])
 logger = get_logger(__name__)
@@ -124,3 +150,14 @@ def chunk_pdf(request: ChunkRequest) -> ChunkingResult:
         )
     except ChunkingError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+
+
+@router.post("/documents/embed", response_model=EmbeddingResult)
+def embed_chunks(request: ChunkingResult) -> EmbeddingResult:
+    try:
+        return generate_embeddings(request)
+    except EmbeddingError as exc:
+        status_code = _EMBEDDING_ERROR_STATUS.get(
+            type(exc), status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+        raise HTTPException(status_code, str(exc)) from exc
