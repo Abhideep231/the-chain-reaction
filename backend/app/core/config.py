@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     upload_dir: str = "./data/uploads"
     max_upload_size_mb: int = 25
 
+    # Chunking
+    chunk_size: int = 1000
+    chunk_overlap: int = 200
+
 
 @lru_cache
 def get_settings() -> Settings:

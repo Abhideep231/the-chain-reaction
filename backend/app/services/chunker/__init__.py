@@ -1,1 +1,1 @@
-"""Document chunking service. Implemented in a future sprint."""
+"""Document chunking service — see chunker.py."""
