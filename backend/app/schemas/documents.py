@@ -33,3 +33,8 @@ class DocumentUploadResult(BaseModel):
     filename: str
     status: str
     parse_result: PdfParseResult
+
+
+class ChunkRequest(BaseModel):
+    document_id: str
+    parse_result: PdfParseResult

@@ -2,10 +2,11 @@
 
 FastAPI backend for The Chain Reaction, an AI-powered engineering
 intelligence platform. Sprint 9 built the modular, production-ready
-application skeleton; Sprint 10 adds the first real capability — PDF
-upload and structured text/metadata extraction. Chunking, embeddings,
-vector database, Claude API, calculation logic, and authentication are
-still not implemented — those are built in future sprints.
+application skeleton; Sprint 10 added PDF upload and structured text/
+metadata extraction; Sprint 11 adds recursive document chunking on top
+of that extracted text. Embeddings, vector database, Claude API,
+calculation logic, and authentication are still not implemented —
+those are built in future sprints.
 
 ## Requirements
 
@@ -55,6 +56,8 @@ hardcoded:
 | `VECTOR_DB_PATH`    | Placeholder — wired up when ChromaDB integration ships |
 | `UPLOAD_DIR`        | Directory uploaded PDFs are persisted to (created automatically) |
 | `MAX_UPLOAD_SIZE_MB`| Maximum accepted upload size in megabytes (default `25`) |
+| `CHUNK_SIZE`        | Target maximum characters per chunk (default `1000`) |
+| `CHUNK_OVERLAP`     | Characters repeated at the start of each chunk after the first (default `200`) |
 
 ## Project structure
 
@@ -64,11 +67,14 @@ backend/
 │   ├── api/routes/       # One module per resource; thin, typed, no business logic yet
 │   ├── core/             # config.py, logging.py, constants.py — cross-cutting concerns
 │   ├── services/
-│   │   └── parser/       # pdf_parser.py (PyMuPDF) + exceptions.py — implemented.
-│   │                     # chunker, embeddings, vectorstore, retrieval, claude,
-│   │                     # calculations remain empty, for future sprints
+│   │   ├── parser/       # pdf_parser.py (PyMuPDF) + exceptions.py — implemented
+│   │   └── chunker/      # chunker.py + models.py + exceptions.py — implemented.
+│   │                     # embeddings, vectorstore, retrieval, claude, calculations
+│   │                     # remain empty, for future sprints
 │   ├── schemas/          # Pydantic request/response models, one module per resource
-│   │                     # (pdf.py holds the parser's structured output schemas)
+│   │                     # (pdf.py holds the parser's structured output schemas;
+│   │                     # the chunker's own output models live in
+│   │                     # services/chunker/models.py, next to the code that builds them)
 │   ├── models/           # Internal domain/DB models — empty until persistence ships
 │   ├── utils/            # Shared, stateless helpers
 │   ├── static/swagger-ui/# Vendored Swagger UI assets (see VENDORED.md)
@@ -87,6 +93,7 @@ backend/
 | GET    | `/documents`         | Placeholder — returns an empty document list                 |
 | POST   | `/documents`         | Placeholder — echoes back upload metadata with a mock ID     |
 | POST   | `/documents/upload`  | **Real** — validates and parses an uploaded PDF (see below)   |
+| POST   | `/documents/chunk`   | **Real** — splits a parsed document into overlapping text chunks (see below) |
 | POST   | `/chat`              | Placeholder — returns a fixed reply                           |
 | POST   | `/calculations`      | Placeholder — returns `status: "not_implemented"`             |
 | GET    | `/admin/status`      | Returns app status plus process uptime                        |
@@ -127,6 +134,52 @@ The original file is persisted to `UPLOAD_DIR` under a generated id
 once parsing succeeds. Every stage (upload started/completed, parsing
 started/completed with duration, page count, extraction errors) is
 logged via the centralized logger.
+
+## Document chunker (`POST /documents/chunk`)
+
+Takes a `document_id` plus the `parse_result` returned by
+`/documents/upload` and splits every page's text into overlapping
+chunks (`app/services/chunker/chunker.py`) — the single source of
+document chunking for the RAG pipeline. Future embedding/retrieval
+sprints consume its `Chunk` objects rather than re-implementing
+splitting logic.
+
+Each page is chunked independently (a chunk never spans two pages), in
+this order per page:
+1. Recursively split the page's text on the highest-priority boundary
+   that's actually present — paragraph, then line, then sentence, then
+   word — only falling back to a hard character split for a single
+   "word" longer than the chunk size (e.g. a very long token).
+2. Greedily pack the resulting pieces into chunks up to `CHUNK_SIZE`
+   characters, seeding each new chunk with the trailing `CHUNK_OVERLAP`
+   characters of the previous chunk.
+
+Because every split step slices the original string without adding,
+removing, or reordering characters, concatenating a page's chunks (and
+subtracting each chunk's overlap prefix) always reconstructs the
+original page text exactly — the overlap is the *only* intentionally
+duplicated text.
+
+Request/response:
+```json
+// POST /documents/chunk
+{ "document_id": "...", "parse_result": { /* from /documents/upload */ } }
+
+// 200 OK
+{ "total_chunks": 20, "chunks": [ { "chunk_id", "document_id", "chunk_index",
+  "page_number", "text", "character_count", "estimated_token_count", "metadata" } ] }
+```
+`estimated_token_count` is a rough `ceil(characters / 4)` heuristic —
+no tokenizer dependency is introduced for a value that's only ever an
+approximation. `metadata` carries the source filename, page number,
+total pages, and a creation timestamp.
+
+Rejected with `422 Unprocessable Entity`:
+- the document has zero pages
+- any page has no extractable (non-whitespace) text
+
+Every stage (chunking started/completed, total chunks, average chunk
+size, processing time) is logged via the centralized logger.
 
 ## Verification
 

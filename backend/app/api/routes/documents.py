@@ -1,9 +1,10 @@
 """Documents (Knowledge Library) routes.
 
-GET/POST /documents remain placeholders (no chunking, embeddings, or
-storage yet — those are implemented in a future sprint). POST
-/documents/upload is real: it validates and parses an uploaded PDF via
-the parser service and persists the raw file to the upload directory.
+GET/POST /documents remain placeholders (no embeddings or storage yet
+— those are implemented in a future sprint). POST /documents/upload
+validates and parses an uploaded PDF via the parser service. POST
+/documents/chunk splits an already-parsed document into overlapping
+text chunks via the chunker service.
 """
 
 import uuid
@@ -15,11 +16,15 @@ from app.core.config import get_settings
 from app.core.constants import ALLOWED_PDF_CONTENT_TYPES, PDF_EXTENSION, PDF_MAGIC_BYTES
 from app.core.logging import get_logger
 from app.schemas.documents import (
+    ChunkRequest,
     DocumentListResponse,
     DocumentUploadRequest,
     DocumentUploadResponse,
     DocumentUploadResult,
 )
+from app.services.chunker.chunker import chunk_document
+from app.services.chunker.exceptions import ChunkingError
+from app.services.chunker.models import ChunkingResult
 from app.services.parser.exceptions import PdfParsingError
 from app.services.parser.pdf_parser import parse_pdf
 
@@ -105,3 +110,17 @@ async def upload_pdf(file: UploadFile) -> DocumentUploadResult:
         status="parsed",
         parse_result=parse_result,
     )
+
+
+@router.post("/documents/chunk", response_model=ChunkingResult)
+def chunk_pdf(request: ChunkRequest) -> ChunkingResult:
+    settings = get_settings()
+    try:
+        return chunk_document(
+            request.parse_result,
+            request.document_id,
+            chunk_size=settings.chunk_size,
+            chunk_overlap=settings.chunk_overlap,
+        )
+    except ChunkingError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
