@@ -39,9 +39,10 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
 
-    # External services (placeholders — populated in future sprints)
-    claude_api_key: str | None = None
+    # External services
+    claude_api_key: str | None = None  # placeholder — populated in a future sprint
     openai_api_key: str | None = None
+    embedding_model: str = "text-embedding-3-large"
 
     # Storage (vector_db_path is a placeholder — populated in a future sprint)
     vector_db_path: str = "./data/chroma"

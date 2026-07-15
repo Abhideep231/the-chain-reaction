@@ -3,10 +3,11 @@
 FastAPI backend for The Chain Reaction, an AI-powered engineering
 intelligence platform. Sprint 9 built the modular, production-ready
 application skeleton; Sprint 10 added PDF upload and structured text/
-metadata extraction; Sprint 11 adds recursive document chunking on top
-of that extracted text. Embeddings, vector database, Claude API,
-calculation logic, and authentication are still not implemented —
-those are built in future sprints.
+metadata extraction; Sprint 11 added recursive document chunking;
+Sprint 12 adds OpenAI embedding generation for those chunks. Vector
+database persistence, retrieval, Claude API, calculation logic, and
+authentication are still not implemented — those are built in future
+sprints.
 
 ## Requirements
 
@@ -52,7 +53,8 @@ hardcoded:
 | `ALLOWED_ORIGINS`   | JSON array of origins allowed by CORS                 |
 | `LOG_LEVEL`         | Root logger level (`DEBUG`, `INFO`, ...)              |
 | `CLAUDE_API_KEY`    | Placeholder — wired up when the Claude service ships  |
-| `OPENAI_API_KEY`    | Placeholder — wired up when the embeddings service ships |
+| `OPENAI_API_KEY`    | Required for `/documents/embed`; no default, must be set to call OpenAI |
+| `EMBEDDING_MODEL`   | OpenAI embedding model name (default `text-embedding-3-large`) |
 | `VECTOR_DB_PATH`    | Placeholder — wired up when ChromaDB integration ships |
 | `UPLOAD_DIR`        | Directory uploaded PDFs are persisted to (created automatically) |
 | `MAX_UPLOAD_SIZE_MB`| Maximum accepted upload size in megabytes (default `25`) |
@@ -68,13 +70,14 @@ backend/
 │   ├── core/             # config.py, logging.py, constants.py — cross-cutting concerns
 │   ├── services/
 │   │   ├── parser/       # pdf_parser.py (PyMuPDF) + exceptions.py — implemented
-│   │   └── chunker/      # chunker.py + models.py + exceptions.py — implemented.
-│   │                     # embeddings, vectorstore, retrieval, claude, calculations
+│   │   ├── chunker/      # chunker.py + models.py + exceptions.py — implemented
+│   │   └── embeddings/   # embedding_service.py (OpenAI) + models.py + exceptions.py —
+│   │                     # implemented. vectorstore, retrieval, claude, calculations
 │   │                     # remain empty, for future sprints
 │   ├── schemas/          # Pydantic request/response models, one module per resource
-│   │                     # (pdf.py holds the parser's structured output schemas;
-│   │                     # the chunker's own output models live in
-│   │                     # services/chunker/models.py, next to the code that builds them)
+│   │                     # (pdf.py holds the parser's structured output schemas; the
+│   │                     # chunker's and embedding service's own output models live in
+│   │                     # services/*/models.py, next to the code that builds them)
 │   ├── models/           # Internal domain/DB models — empty until persistence ships
 │   ├── utils/            # Shared, stateless helpers
 │   ├── static/swagger-ui/# Vendored Swagger UI assets (see VENDORED.md)
@@ -94,6 +97,7 @@ backend/
 | POST   | `/documents`         | Placeholder — echoes back upload metadata with a mock ID     |
 | POST   | `/documents/upload`  | **Real** — validates and parses an uploaded PDF (see below)   |
 | POST   | `/documents/chunk`   | **Real** — splits a parsed document into overlapping text chunks (see below) |
+| POST   | `/documents/embed`   | **Real** — generates OpenAI embeddings for a chunked document (see below) |
 | POST   | `/chat`              | Placeholder — returns a fixed reply                           |
 | POST   | `/calculations`      | Placeholder — returns `status: "not_implemented"`             |
 | GET    | `/admin/status`      | Returns app status plus process uptime                        |
@@ -180,6 +184,59 @@ Rejected with `422 Unprocessable Entity`:
 
 Every stage (chunking started/completed, total chunks, average chunk
 size, processing time) is logged via the centralized logger.
+
+## Embedding generation (`POST /documents/embed`)
+
+Takes the `ChunkingResult` returned by `/documents/chunk` and generates
+an OpenAI embedding vector for every chunk
+(`app/services/embeddings/embedding_service.py`) — the single source
+of embedding generation for the RAG pipeline. **Embeddings are
+returned in the response only; nothing is persisted.** Vector storage
+is a future sprint.
+
+Request/response:
+```json
+// POST /documents/embed
+{ "total_chunks": 20, "chunks": [ /* from /documents/chunk */ ] }
+
+// 200 OK
+{ "total_embeddings": 20, "embedding_model": "text-embedding-3-large",
+  "vector_dimension": 3072, "embeddings": [ { "embedding_id", "document_id",
+  "chunk_id", "chunk_index", "embedding_model", "vector_dimension",
+  "embedding": [/* floats */], "created_at" } ] }
+```
+
+Chunks are sent to OpenAI in batches of 100 per request (a large
+document never becomes one request per chunk), and the response is
+re-sorted by OpenAI's own per-item `index` before being mapped back to
+chunks — defensive against a provider ever returning results
+out of order. `vector_dimension` is read from the actual response
+(`len(embedding)`), never hardcoded per model name, so a model change
+via `EMBEDDING_MODEL` doesn't require a code change.
+
+The OpenAI client is injectable (`generate_embeddings(..., client=...)`),
+so the service itself never constructs a network client when a caller
+supplies one — this is what makes the error-handling paths below
+testable without a real API key or network access.
+
+Error handling, mapped to distinct HTTP statuses:
+
+| Failure                                   | Status                   |
+| ------------------------------------------ | ------------------------- |
+| Empty chunk list                           | 422 Unprocessable Entity  |
+| A chunk has no text                        | 422 Unprocessable Entity  |
+| `OPENAI_API_KEY` not configured            | 500 Internal Server Error |
+| OpenAI rejects the configured model        | 500 Internal Server Error |
+| OpenAI rejects the API key                 | 500 Internal Server Error |
+| OpenAI rate limit exceeded                 | 429 Too Many Requests     |
+| Request to OpenAI timed out                | 504 Gateway Timeout       |
+| Any other OpenAI API error                 | 502 Bad Gateway           |
+
+Every stage (embedding started/completed, chunks processed, model
+used, vector dimension, processing duration) is logged via the
+centralized logger — including when a request fails before ever
+reaching OpenAI (e.g. a missing API key), so an attempted embed is
+never silent in the logs.
 
 ## Verification
 
