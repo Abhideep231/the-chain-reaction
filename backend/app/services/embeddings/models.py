@@ -10,6 +10,9 @@ class Embedding(BaseModel):
     document_id: str
     chunk_id: str
     chunk_index: int
+    chunk_text: str
+    filename: str
+    page_number: int
     embedding_model: str
     vector_dimension: int
     embedding: list[float]

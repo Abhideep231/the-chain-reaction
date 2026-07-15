@@ -1,1 +1,1 @@
-"""Vector database (ChromaDB) service. Implemented in a future sprint."""
+"""Vector database (ChromaDB) service — see vector_store.py."""
