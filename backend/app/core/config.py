@@ -44,8 +44,8 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     embedding_model: str = "text-embedding-3-large"
 
-    # Storage (vector_db_path is a placeholder — populated in a future sprint)
-    vector_db_path: str = "./data/chroma"
+    # Storage
+    vector_db_path: str = "./data/chromadb"
     upload_dir: str = "./data/uploads"
     max_upload_size_mb: int = 25
 

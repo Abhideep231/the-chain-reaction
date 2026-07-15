@@ -1,12 +1,13 @@
 """Documents (Knowledge Library) routes.
 
-GET/POST /documents remain placeholders (no vector storage yet — that
-is implemented in a future sprint). POST /documents/upload validates
-and parses an uploaded PDF via the parser service. POST
+GET/POST /documents remain placeholders. POST /documents/upload
+validates and parses an uploaded PDF via the parser service. POST
 /documents/chunk splits an already-parsed document into overlapping
 text chunks via the chunker service. POST /documents/embed generates
 OpenAI embeddings for an already-chunked document via the embedding
-service; embeddings are returned in memory only, never persisted.
+service. POST /documents/store persists an EmbeddingResult into
+ChromaDB via the vector store service — see api/routes/vectorstore.py
+for the collection-level status/delete/reset endpoints.
 """
 
 import uuid
@@ -42,6 +43,9 @@ from app.services.embeddings.exceptions import (
 from app.services.embeddings.models import EmbeddingResult
 from app.services.parser.exceptions import PdfParsingError
 from app.services.parser.pdf_parser import parse_pdf
+from app.services.vectorstore.exceptions import VectorStoreError
+from app.services.vectorstore.models import StoreEmbeddingsResult
+from app.services.vectorstore.vector_store import get_vector_store_service
 
 _EMBEDDING_ERROR_STATUS: dict[type[EmbeddingError], int] = {
     EmptyChunkListError: status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -161,3 +165,11 @@ def embed_chunks(request: ChunkingResult) -> EmbeddingResult:
             type(exc), status.HTTP_500_INTERNAL_SERVER_ERROR
         )
         raise HTTPException(status_code, str(exc)) from exc
+
+
+@router.post("/documents/store", response_model=StoreEmbeddingsResult)
+def store_embeddings(request: EmbeddingResult) -> StoreEmbeddingsResult:
+    try:
+        return get_vector_store_service().store_embeddings(request)
+    except VectorStoreError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
