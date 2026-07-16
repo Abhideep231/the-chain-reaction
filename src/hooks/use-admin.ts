@@ -63,8 +63,13 @@ export function useAdmin() {
                   ...service,
                   status: isHealthy ? "operational" : "offline",
                   lastChecked: "Just now",
+                  metricLabel: vectorStoreStatus.collection_exists
+                    ? "Total vectors"
+                    : "Response time",
                   responseTime: vectorStoreStatus.collection_exists
-                    ? `${vectorStoreStatus.total_vectors.toLocaleString("en-US")} vectors`
+                    ? `${vectorStoreStatus.total_vectors.toLocaleString("en-US")} vector${
+                        vectorStoreStatus.total_vectors === 1 ? "" : "s"
+                      }`
                     : "No collection yet",
                 }
               : service

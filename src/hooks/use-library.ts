@@ -163,6 +163,7 @@ export function useLibrary() {
     filters,
     sort,
     viewMode,
+    documents,
     filteredDocuments,
     selectedDocumentId,
     selectedDocument,

@@ -26,6 +26,10 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.start_time = time.monotonic()
     logger.info("%s v%s starting up", settings.app_name, settings.api_version)
+    if not settings.anthropic_api_key:
+        logger.warning("ANTHROPIC_API_KEY is not set — /chat/ask will fail until configured")
+    if not settings.openai_api_key:
+        logger.warning("OPENAI_API_KEY is not set — upload/embedding will fail until configured")
     yield
     logger.info("%s shutting down", settings.app_name)
 

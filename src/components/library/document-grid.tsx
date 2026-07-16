@@ -5,19 +5,21 @@ import type { LibraryDocument, LibraryViewMode } from "@/types/library"
 
 export function DocumentGrid({
   documents,
+  hasDocuments,
   viewMode,
   selectedDocumentId,
   onSelectDocument,
   onClearFilters,
 }: {
   documents: LibraryDocument[]
+  hasDocuments: boolean
   viewMode: LibraryViewMode
   selectedDocumentId: string | null
   onSelectDocument: (id: string) => void
   onClearFilters: () => void
 }) {
   if (documents.length === 0) {
-    return <EmptyLibrary onClearFilters={onClearFilters} />
+    return <EmptyLibrary hasDocuments={hasDocuments} onClearFilters={onClearFilters} />
   }
 
   if (viewMode === "list") {

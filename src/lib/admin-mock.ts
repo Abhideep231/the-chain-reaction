@@ -100,6 +100,7 @@ export const initialHealth: SystemHealthService[] = [
     status: "warning",
     lastChecked: "3 min ago",
     responseTime: "2.4s",
+    metricLabel: "Response time",
   },
   {
     id: "embedding-service",
@@ -107,6 +108,7 @@ export const initialHealth: SystemHealthService[] = [
     status: "operational",
     lastChecked: "Just now",
     responseTime: "180 ms",
+    metricLabel: "Response time",
   },
   {
     id: "parser",
@@ -114,6 +116,7 @@ export const initialHealth: SystemHealthService[] = [
     status: "operational",
     lastChecked: "Just now",
     responseTime: "220 ms",
+    metricLabel: "Response time",
   },
   {
     id: "chunking-engine",
@@ -121,6 +124,7 @@ export const initialHealth: SystemHealthService[] = [
     status: "operational",
     lastChecked: "Just now",
     responseTime: "95 ms",
+    metricLabel: "Response time",
   },
   {
     id: "chromadb",
@@ -128,6 +132,7 @@ export const initialHealth: SystemHealthService[] = [
     status: "operational",
     lastChecked: "Just now",
     responseTime: "12 ms",
+    metricLabel: "Response time",
   },
   {
     id: "retrieval-engine",
@@ -135,6 +140,7 @@ export const initialHealth: SystemHealthService[] = [
     status: "operational",
     lastChecked: "1 min ago",
     responseTime: "340 ms",
+    metricLabel: "Response time",
   },
 ]
 

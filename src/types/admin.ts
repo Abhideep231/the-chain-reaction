@@ -18,6 +18,7 @@ export interface SystemHealthService {
   status: ServiceStatus
   lastChecked: string
   responseTime: string
+  metricLabel: string
 }
 
 export interface KnowledgeStatistics {

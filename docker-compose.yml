@@ -1,0 +1,33 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      # Pin storage paths to the mounted volumes below, regardless of the
+      # (relative, local-dev-oriented) paths in backend/.env — env_file
+      # values are overridden by environment values in Compose's merge order.
+      VECTOR_DB_PATH: /data/chromadb
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - chroma-data:/data/chromadb
+      - upload-data:/data/uploads
+
+  frontend:
+    build:
+      context: .
+      args:
+        # The browser calls this URL directly, so it must be reachable from
+        # the host — the backend's published port, not the compose service name.
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  chroma-data:
+  upload-data:

@@ -68,6 +68,7 @@ export function LibraryWorkspace() {
           ) : (
             <DocumentGrid
               documents={library.filteredDocuments}
+              hasDocuments={library.documents.length > 0}
               viewMode={library.viewMode}
               selectedDocumentId={library.selectedDocumentId}
               onSelectDocument={library.selectDocument}

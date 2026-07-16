@@ -42,7 +42,7 @@ export function SystemServiceCard({
         </span>
       </div>
       <p className="text-sm text-muted-foreground">
-        Response time:{" "}
+        {service.metricLabel}:{" "}
         <span className="font-medium text-foreground">{service.responseTime}</span>
       </p>
       <p className="text-xs text-muted-foreground">
