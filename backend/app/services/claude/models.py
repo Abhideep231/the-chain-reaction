@@ -18,3 +18,4 @@ class AskResponse(BaseModel):
     confidence: float
     response_time_ms: float
     model: str
+    session_id: str

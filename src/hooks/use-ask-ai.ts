@@ -12,6 +12,11 @@ export function useAskAi() {
   const [messages, setMessages] = React.useState<ChatMessage[]>([])
   const [status, setStatus] = React.useState<"idle" | "loading">("idle")
 
+  // One conversation session per hook lifetime — generated once, on
+  // mount, so a page reload (a fresh mount) naturally starts a new,
+  // empty conversation. Opaque to the user; never rendered.
+  const sessionIdRef = React.useRef<string>(crypto.randomUUID())
+
   const send = React.useCallback((prompt: string) => {
     const trimmed = prompt.trim()
     if (!trimmed || status === "loading") {
@@ -27,8 +32,9 @@ export function useAskAi() {
     setMessages((prev) => [...prev, userMessage])
     setStatus("loading")
 
-    askQuestion(trimmed)
+    askQuestion(trimmed, sessionIdRef.current)
       .then((response) => {
+        sessionIdRef.current = response.session_id
         const answer = adaptAskResponse(response)
         const assistantMessage: ChatMessage = {
           id: crypto.randomUUID(),

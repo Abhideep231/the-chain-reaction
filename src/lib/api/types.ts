@@ -186,4 +186,5 @@ export interface AskResponse {
   confidence: number
   response_time_ms: number
   model: string
+  session_id: string
 }

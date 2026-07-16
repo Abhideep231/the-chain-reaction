@@ -6,10 +6,12 @@ application skeleton; Sprint 10 added PDF upload and structured text/
 metadata extraction; Sprint 11 added recursive document chunking;
 Sprint 12 added OpenAI embedding generation; Sprint 13 added local
 persistent vector storage (ChromaDB); Sprint 14 added semantic
-similarity search over that store; Sprint 15 adds single-turn RAG
-answer generation via Claude on top of that retrieval. Chat history/
-memory, calculation logic, and authentication are still not
-implemented — those are built in future sprints.
+similarity search over that store; Sprint 15 added single-turn RAG
+answer generation via Claude on top of that retrieval; Sprint 17 added
+source citations with a text snippet per citation; Sprint 18 added
+session-scoped conversation memory so follow-up questions resolve
+against the current conversation. Calculation logic and authentication
+are still not implemented — those are built in future sprints.
 
 ## Requirements
 
@@ -83,9 +85,11 @@ backend/
 │   │   │                 # implemented
 │   │   ├── retrieval/    # retrieval_service.py + models.py + exceptions.py —
 │   │   │                 # implemented
-│   │   └── claude/       # claude_service.py + prompt_builder.py + models.py +
-│   │                     # exceptions.py — implemented. calculations remains empty,
-│   │                     # for a future sprint
+│   │   ├── claude/       # claude_service.py + prompt_builder.py + models.py +
+│   │   │                 # exceptions.py — implemented. calculations remains empty,
+│   │   │                 # for a future sprint
+│   │   └── conversation/ # conversation_service.py + models.py + exceptions.py —
+│   │                     # in-memory, session-scoped chat history (Sprint 18)
 │   ├── schemas/          # Pydantic request/response models, one module per resource
 │   │                     # (pdf.py holds the parser's structured output schemas; the
 │   │                     # chunker's, embedding service's, vector store's, and retrieval
@@ -116,8 +120,8 @@ backend/
 | DELETE | `/vectorstore/document/{document_id}` | **Real** — deletes all vectors for one document |
 | DELETE | `/vectorstore/reset` | **Real** — resets the entire vector database              |
 | POST   | `/documents/retrieve`| **Real** — semantic similarity search over stored vectors (see below) |
-| POST   | `/chat`              | Placeholder — returns a fixed reply (multi-turn chat, a future sprint) |
-| POST   | `/chat/ask`          | **Real** — single-turn RAG: retrieval + Claude (see below)    |
+| POST   | `/chat`              | Placeholder — returns a fixed reply (unrelated legacy schema; superseded by the session memory on `/chat/ask` below) |
+| POST   | `/chat/ask`          | **Real** — RAG (retrieval + Claude) with session-scoped conversation memory (see below) |
 | POST   | `/calculations`      | Placeholder — returns `status: "not_implemented"`             |
 | GET    | `/admin/status`      | Returns app status plus process uptime                        |
 
@@ -388,17 +392,21 @@ via the centralized logger.
 
 ## Claude integration (`POST /chat/ask`)
 
-Answers a natural-language question with single-turn RAG: retrieve
-relevant chunks, build a context-grounded prompt, and ask Claude to
-answer strictly from that context (`app/services/claude/claude_service.py`
-— the single source of Claude answer generation). No streaming, no
-conversation memory/history, no prompt caching, no agent framework —
-one question in, one grounded answer out.
+Answers a natural-language question with RAG — retrieve relevant
+chunks, build a context-grounded prompt, and ask Claude to answer
+strictly from that context — grounded in both the current document set
+and (Sprint 18) this session's recent conversation history
+(`app/services/claude/claude_service.py` — the single source of Claude
+answer generation). No streaming, no prompt caching, no agent
+framework — each call is still a single Claude request, just one that
+now carries prior turns.
 
 ### RAG flow
 
 ```
-User Question
+Question
+     |
+Conversation Context           (in-memory, session-scoped — see below)
      |
 Generate Query Embedding      (reused: embedding service, Sprint 12)
      |
@@ -415,10 +423,43 @@ Final Answer
 Return Sources                (citations, one per retrieved chunk)
 ```
 
-Every step through "Top Relevant Chunks" is exactly `retrieve()` from
+Every step from "Generate Query Embedding" through "Top Relevant
+Chunks" is exactly `retrieve()` from
 `app.services.retrieval.retrieval_service` (Sprint 14), called with a
-fixed context size (`CONTEXT_TOP_K = 5`) — this sprint adds nothing new
-to retrieval itself, only what happens after it.
+fixed context size (`CONTEXT_TOP_K = 5`) — retrieval itself is
+unchanged; only the query text handed to it, and the message history
+handed to Claude, are new.
+
+### Conversation memory (Sprint 18)
+
+Session-scoped, in-memory only — `app/services/conversation/conversation_service.py`.
+No database, no Redis, no filesystem persistence, no user accounts or
+authentication. A server restart clears every session; that's an
+accepted MVP trade-off, not a bug.
+
+- **Session id**: an opaque string the client generates (or omits, in
+  which case one is minted and returned in the response). Two
+  different session ids never see each other's history —
+  `ConversationStore` is a single process-wide dict keyed by session
+  id, guarded by a lock for safe concurrent access.
+- **Rolling window**: the last `MAX_EXCHANGES_PER_SESSION` (8)
+  exchanges per session — a "exchange" is one user turn plus one
+  assistant turn. Older turns are dropped first, so token usage per
+  request stays bounded regardless of how long a conversation runs.
+- **Resolving follow-ups for retrieval**: a pronoun-dependent follow-up
+  ("What are its advantages?") would retrieve nothing useful if
+  embedded on its own. `build_retrieval_query` folds the most recent
+  user questions into the new one before it's embedded — no extra
+  Claude call to rewrite the question first.
+- **Resolving follow-ups for Claude**: the prior turns (question text
+  and answer text only, not their retrieved-context blocks) are passed
+  as real conversation turns in the Anthropic `messages` list, ahead of
+  the current turn's context-grounded question. Each turn still gets
+  its own fresh retrieval — old context is never carried forward
+  verbatim, keeping the prompt from growing unbounded.
+- **Unbounded session growth**: capped at `MAX_SESSIONS` (500)
+  in-memory sessions; the least-recently-active session is evicted
+  first once that cap is reached.
 
 ### Prompt design
 
@@ -454,19 +495,26 @@ used for the OpenAI client in the embedding service.
 
 ```json
 // POST /chat/ask
-{ "question": "What is the required safety factor for a steel beam?" }
+{ "question": "What is the required safety factor for a steel beam?",
+  "session_id": "3f1c2e6a-..." }
 
 // 200 OK
 { "answer": "...", "citations": [ { "document_id", "filename",
-  "page_number", "chunk_id", "similarity_score" } ], "confidence": 0.87,
-  "response_time_ms": 842.3, "model": "claude-sonnet-4" }
+  "page_number", "chunk_id", "similarity_score", "snippet" } ],
+  "confidence": 0.87, "response_time_ms": 842.3, "model": "claude-sonnet-4",
+  "session_id": "3f1c2e6a-..." }
 ```
+`session_id` is optional on the request — omit it to start a fresh,
+empty conversation; the response always echoes back the session id
+that was actually used (the one supplied, or a freshly minted one).
 `citations` has one entry per chunk used as context (from the same
-retrieval results, not re-derived). `confidence` is **not** Claude
-self-reporting a number — it's the best-matching retrieved chunk's own
-`similarity_score`, a real, computed retrieval signal. Asking an LLM to
-invent its own confidence score would itself be exactly the kind of
-unsupported value this service is built to avoid.
+retrieval results, not re-derived), each with a short (≤200 character)
+text preview — never the full chunk, never an embedding vector.
+`confidence` is **not** Claude self-reporting a number — it's the
+best-matching retrieved chunk's own `similarity_score`, a real,
+computed retrieval signal. Asking an LLM to invent its own confidence
+score would itself be exactly the kind of unsupported value this
+service is built to avoid.
 
 ### Error handling
 
@@ -480,6 +528,7 @@ sufficiency per the system prompt and returns the standard
 
 | Failure                                       | Status                     |
 | ------------------------------------------------ | ---------------------------- |
+| `session_id` supplied but blank or over 100 characters | 422 Unprocessable Entity |
 | No relevant chunks found (empty retrieval)        | 404 Not Found                |
 | `ANTHROPIC_API_KEY` not configured                | 500 Internal Server Error    |
 | Claude rejects the API key                        | 500 Internal Server Error    |

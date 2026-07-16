@@ -23,3 +23,7 @@ class ChatResponse(BaseModel):
 
 class AskRequest(BaseModel):
     question: str
+    # Sprint 18 (conversation memory): opaque, client-generated session
+    # identifier. Omitted (or on an unseen id) starts a fresh, empty
+    # conversation — see app.services.conversation.conversation_service.
+    session_id: str | None = None
