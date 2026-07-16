@@ -77,7 +77,9 @@ export function useDashboard() {
       vectorStoreStatus?.health === "ok" ? "operational" : "down"
     const chromaMetricValue = vectorStoreStatus
       ? vectorStoreStatus.collection_exists
-        ? `${vectorStoreStatus.total_vectors.toLocaleString("en-US")} vectors`
+        ? `${vectorStoreStatus.total_vectors.toLocaleString("en-US")} vector${
+            vectorStoreStatus.total_vectors === 1 ? "" : "s"
+          }`
         : "No collection yet"
       : undefined
 

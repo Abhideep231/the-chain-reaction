@@ -18,6 +18,8 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      // Python backend — not part of this project's frontend lint target.
+      "backend/**",
     ],
   },
 ];

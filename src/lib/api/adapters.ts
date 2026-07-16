@@ -241,10 +241,15 @@ export function adaptRecentlyIndexed(
       (a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime()
     )
     .slice(0, RECENTLY_INDEXED_LIMIT)
-    .map((document) => ({
-      id: document.id,
-      title: document.filename,
-      subtitle: `${document.page_count ?? 0} pages · ${document.chunk_count} passages`,
-      timestamp: formatRelativeTime(document.uploaded_at),
-    }))
+    .map((document) => {
+      const pageCount = document.page_count ?? 0
+      return {
+        id: document.id,
+        title: document.filename,
+        subtitle: `${pageCount} page${pageCount === 1 ? "" : "s"} · ${
+          document.chunk_count
+        } passage${document.chunk_count === 1 ? "" : "s"}`,
+        timestamp: formatRelativeTime(document.uploaded_at),
+      }
+    })
 }
