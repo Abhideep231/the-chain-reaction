@@ -1,15 +1,18 @@
 """Documents (Knowledge Library) routes.
 
-GET/POST /documents remain placeholders. POST /documents/upload
-validates and parses an uploaded PDF via the parser service. POST
-/documents/chunk splits an already-parsed document into overlapping
-text chunks via the chunker service. POST /documents/embed generates
-OpenAI embeddings for an already-chunked document via the embedding
-service. POST /documents/store persists an EmbeddingResult into
-ChromaDB via the vector store service. POST /documents/retrieve runs
-semantic similarity search via the retrieval service — see
+GET /documents (Sprint 20) lists real, fully-indexed documents,
+aggregated from their stored chunks via the vector store service — see
 api/routes/vectorstore.py for the collection-level status/delete/reset
-endpoints.
+endpoints, including the per-document delete the Knowledge Library
+uses. POST /documents remains a placeholder (unrelated legacy schema).
+POST /documents/upload validates and parses an uploaded PDF via the
+parser service. POST /documents/chunk splits an already-parsed
+document into overlapping text chunks via the chunker service. POST
+/documents/embed generates OpenAI embeddings for an already-chunked
+document via the embedding service. POST /documents/store persists an
+EmbeddingResult into ChromaDB via the vector store service. POST
+/documents/retrieve runs semantic similarity search via the retrieval
+service.
 """
 
 import uuid
@@ -23,6 +26,7 @@ from app.core.logging import get_logger
 from app.schemas.documents import (
     ChunkRequest,
     DocumentListResponse,
+    DocumentSummary,
     DocumentUploadRequest,
     DocumentUploadResponse,
     DocumentUploadResult,
@@ -82,9 +86,34 @@ router = APIRouter(tags=["documents"])
 logger = get_logger(__name__)
 
 
+def _file_size_bytes(path: Path) -> int | None:
+    """Real size of an uploaded PDF still on disk, or None if it's
+    missing — never fabricated, and never fatal to listing documents."""
+    try:
+        return path.stat().st_size
+    except OSError:
+        return None
+
+
 @router.get("/documents", response_model=DocumentListResponse)
 def list_documents() -> DocumentListResponse:
-    return DocumentListResponse(documents=[], total=0)
+    settings = get_settings()
+    upload_dir = Path(settings.upload_dir)
+
+    stored_documents = get_vector_store_service().list_documents()
+    documents = [
+        DocumentSummary(
+            id=doc.document_id,
+            filename=doc.filename,
+            status="indexed",
+            page_count=doc.page_count,
+            chunk_count=doc.chunk_count,
+            file_size_bytes=_file_size_bytes(upload_dir / f"{doc.document_id}{PDF_EXTENSION}"),
+            uploaded_at=doc.first_stored_at,
+        )
+        for doc in stored_documents
+    ]
+    return DocumentListResponse(documents=documents, total=len(documents))
 
 
 @router.post("/documents", response_model=DocumentUploadResponse)

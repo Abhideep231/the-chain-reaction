@@ -1,19 +1,20 @@
-import { ExternalLinkIcon, FileTextIcon } from "lucide-react"
+import { ExternalLinkIcon, Trash2Icon } from "lucide-react"
 
 import { RevisionTimeline } from "@/components/library/revision-timeline"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { KeyValueList } from "@/components/shared/key-value-list"
 import { StatusBadge } from "@/components/shared/status-badge"
-import { getDocumentById } from "@/lib/library-mock"
 import type { LibraryDocument } from "@/types/library"
 
 export function MetadataPanel({
   document,
-  onSelectDocument,
+  onDeleteDocument,
+  isDeleting,
 }: {
   document: LibraryDocument | null
-  onSelectDocument: (id: string) => void
+  onDeleteDocument: (id: string) => void
+  isDeleting: boolean
 }) {
   return (
     <div className="flex w-80 flex-1 flex-col overflow-hidden">
@@ -46,6 +47,7 @@ export function MetadataPanel({
                 },
                 { label: "File size", value: document.fileSize },
                 { label: "Pages", value: String(document.pageCount) },
+                { label: "Chunks", value: String(document.chunkCount) },
                 { label: "Last updated", value: document.lastUpdated },
               ]}
             />
@@ -62,30 +64,9 @@ export function MetadataPanel({
             <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
               Related Documents
             </h3>
-            {document.relatedDocumentIds.length > 0 ? (
-              <ul className="flex flex-col gap-1">
-                {document.relatedDocumentIds.map((relatedId) => {
-                  const related = getDocumentById(relatedId)
-                  if (!related) return null
-                  return (
-                    <li key={relatedId}>
-                      <button
-                        type="button"
-                        onClick={() => onSelectDocument(relatedId)}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent"
-                      >
-                        <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                        <span className="truncate">{related.title}</span>
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                No related documents.
-              </p>
-            )}
+            <p className="text-sm text-muted-foreground">
+              No related documents.
+            </p>
           </section>
 
           <section className="flex flex-col gap-2">
@@ -129,6 +110,20 @@ export function MetadataPanel({
                   Opening in PDF Viewer isn&apos;t connected yet
                 </TooltipContent>
               </Tooltip>
+              <Button
+                variant="outline"
+                size="sm"
+                className="justify-start text-status-critical hover:text-status-critical"
+                disabled={isDeleting}
+                onClick={() => {
+                  if (window.confirm(`Delete "${document.title}"? This cannot be undone.`)) {
+                    onDeleteDocument(document.id)
+                  }
+                }}
+              >
+                <Trash2Icon />
+                {isDeleting ? "Deleting…" : "Delete Document"}
+              </Button>
             </div>
           </section>
         </div>

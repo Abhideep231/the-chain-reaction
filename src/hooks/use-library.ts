@@ -3,7 +3,7 @@
 import * as React from "react"
 
 import { adaptDocumentSummary } from "@/lib/api/adapters"
-import { listDocuments } from "@/lib/api/documents"
+import { deleteDocument as requestDeleteDocument, listDocuments } from "@/lib/api/documents"
 import { friendlyErrorMessage } from "@/lib/api/errors"
 import {
   ALL_FILTER_VALUE,
@@ -24,6 +24,7 @@ export function useLibrary() {
   const [documents, setDocuments] = React.useState<LibraryDocument[]>([])
   const [isLoading, setIsLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
+  const [deletingId, setDeletingId] = React.useState<string | null>(null)
   const [filters, setFilters] = React.useState<LibraryFilters>(defaultFilters)
   const [sort, setSort] = React.useState<LibrarySortOption>("recent")
   const [viewMode, setViewMode] = React.useState<LibraryViewMode>("grid")
@@ -31,28 +32,55 @@ export function useLibrary() {
     string | null
   >(null)
 
+  const isMountedRef = React.useRef(true)
   React.useEffect(() => {
-    let cancelled = false
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
+
+  // Shared by the initial load and the toolbar's manual "Refresh" —
+  // one fetch implementation, guarded once against setting state after
+  // unmount, rather than duplicating it per call site.
+  const refresh = React.useCallback(() => {
     setIsLoading(true)
     setError(null)
-
-    listDocuments()
+    return listDocuments()
       .then((response) => {
-        if (cancelled) return
+        if (!isMountedRef.current) return
         setDocuments(response.documents.map(adaptDocumentSummary))
       })
       .catch((caught: unknown) => {
-        if (cancelled) return
+        if (!isMountedRef.current) return
         setError(friendlyErrorMessage(caught))
       })
       .finally(() => {
-        if (!cancelled) setIsLoading(false)
+        if (isMountedRef.current) setIsLoading(false)
       })
-
-    return () => {
-      cancelled = true
-    }
   }, [])
+
+  React.useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  const deleteDocument = React.useCallback(
+    (id: string) => {
+      setDeletingId(id)
+      return requestDeleteDocument(id)
+        .then(() => {
+          setSelectedDocumentId((prev) => (prev === id ? null : prev))
+          return refresh()
+        })
+        .catch((caught: unknown) => {
+          setError(friendlyErrorMessage(caught))
+        })
+        .finally(() => {
+          setDeletingId(null)
+        })
+    },
+    [refresh]
+  )
 
   const setSearch = React.useCallback((search: string) => {
     setFilters((prev) => ({ ...prev, search }))
@@ -131,6 +159,7 @@ export function useLibrary() {
   return {
     isLoading,
     error,
+    deletingId,
     filters,
     sort,
     viewMode,
@@ -145,5 +174,7 @@ export function useLibrary() {
     setViewMode,
     clearFilters,
     selectDocument,
+    refresh,
+    deleteDocument,
   }
 }

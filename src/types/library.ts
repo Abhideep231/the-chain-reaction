@@ -29,6 +29,9 @@ export interface LibraryDocument {
   version: string
   fileSize: string
   pageCount: number
+  /** Real chunk count once backed by the vector store (Sprint 20); 0 for
+   * a document with no real chunk data. */
+  chunkCount: number
   lastUpdated: string
   status: DocumentStatus
   previewKind: PreviewKind

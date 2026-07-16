@@ -59,3 +59,21 @@ class QueryMatch(BaseModel):
     created_at: datetime
     distance: float
     similarity_score: float
+
+
+class StoredDocumentSummary(BaseModel):
+    """One document's aggregate metadata, derived entirely from its
+    stored chunks (Sprint 20) — the vector store's own view of "what
+    documents exist," independent of anything the upload/parse stage
+    knew. `page_count` is the highest page number that produced a
+    chunk, not `PdfMetadata.total_pages` directly, though the two agree
+    for any document that made it through chunking (every page must
+    have extractable text or chunking itself fails).
+    """
+
+    document_id: str
+    filename: str
+    chunk_count: int
+    page_count: int
+    embedding_model: str
+    first_stored_at: datetime

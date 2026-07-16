@@ -16,10 +16,19 @@ export function LibraryWorkspace() {
     () => (
       <MetadataPanel
         document={library.selectedDocument}
-        onSelectDocument={library.selectDocument}
+        onDeleteDocument={library.deleteDocument}
+        isDeleting={
+          library.deletingId !== null &&
+          library.deletingId === library.selectedDocumentId
+        }
       />
     ),
-    [library.selectedDocument, library.selectDocument]
+    [
+      library.selectedDocument,
+      library.deleteDocument,
+      library.deletingId,
+      library.selectedDocumentId,
+    ]
   )
   useUtilityPanelContent(panelContent, { openOnMount: true })
 
@@ -44,6 +53,8 @@ export function LibraryWorkspace() {
           onSortChange={library.setSort}
           viewMode={library.viewMode}
           onViewModeChange={library.setViewMode}
+          onRefresh={library.refresh}
+          isRefreshing={library.isLoading}
         />
         <div className="flex-1 overflow-auto p-4">
           {library.isLoading ? (
