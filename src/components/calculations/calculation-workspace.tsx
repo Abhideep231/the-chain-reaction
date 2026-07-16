@@ -3,6 +3,8 @@
 import * as React from "react"
 
 import { EmptyState } from "@/components/calculations/empty-state"
+import { ErrorState } from "@/components/calculations/error-state"
+import { ExplanationCard } from "@/components/calculations/explanation-card"
 import { LoadingState } from "@/components/calculations/loading-state"
 import { ParameterGroup } from "@/components/calculations/parameter-group"
 import { ParameterInput } from "@/components/calculations/parameter-input"
@@ -30,8 +32,17 @@ const LUBRICATION_OPTIONS = [
 const DUTY_CYCLE_OPTIONS = ["Continuous", "Intermittent", "Occasional"] as const
 
 export function CalculationWorkspace() {
-  const { input, updateField, status, currentStepIndex, result, summary, runCalculation } =
-    useCalculation()
+  const {
+    input,
+    updateField,
+    status,
+    currentStepIndex,
+    result,
+    summary,
+    explanation,
+    error,
+    runCalculation,
+  } = useCalculation()
 
   const panelContent = React.useMemo(
     () => <SummaryPanel summary={summary} />,
@@ -196,6 +207,12 @@ export function CalculationWorkspace() {
           {status === "loading" && (
             <LoadingState currentStepIndex={currentStepIndex} />
           )}
+          {status === "error" && (
+            <ErrorState
+              message={error ?? "Something went wrong. Please try again."}
+              onRetry={runCalculation}
+            />
+          )}
           {status === "complete" && result && (
             <div className="flex flex-col gap-4">
               <div className="flex items-center justify-between gap-2">
@@ -212,6 +229,8 @@ export function CalculationWorkspace() {
                   <ResultCard key={card.id} data={card} />
                 ))}
               </div>
+
+              {explanation && <ExplanationCard explanation={explanation} />}
             </div>
           )}
         </div>

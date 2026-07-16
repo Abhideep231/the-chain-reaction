@@ -1,5 +1,11 @@
-import type { AskResponse, DocumentSummary } from "@/lib/api/types"
+import type {
+  AskResponse,
+  ChainSelectionInput,
+  ChainSelectionResult,
+  DocumentSummary,
+} from "@/lib/api/types"
 import type { Citation, EngineeringAnswer, RetrievedDocument } from "@/types/chat"
+import type { CalculationInput, CalculationResult } from "@/types/calculation"
 import type { LibraryDocument } from "@/types/library"
 import type { ConfidenceLevel } from "@/types/shared"
 
@@ -85,5 +91,49 @@ export function adaptDocumentSummary(summary: DocumentSummary): LibraryDocument 
     engineeringNotes: "",
     relatedDocumentIds: [],
     revisionHistory: [],
+  }
+}
+
+/** Maps the frontend's `CalculationInput` (Sprint 6) onto
+ * `POST /calculations`'s `ChainSelectionInput` wire shape — a
+ * mechanical camelCase-to-snake_case rename, no value changes. */
+export function adaptCalculationInput(input: CalculationInput): ChainSelectionInput {
+  return {
+    chain_type: input.chainType,
+    chain_standard: input.chainStandard,
+    pitch: input.pitch,
+    number_of_teeth: input.numberOfTeeth,
+    driver_rpm: input.driverRpm,
+    driven_rpm: input.drivenRpm,
+    power_kw: input.powerKw,
+    torque: input.torque,
+    service_factor: input.serviceFactor,
+    shock_load: input.shockLoad,
+    temperature: input.temperature,
+    lubrication: input.lubrication,
+    operating_hours: input.operatingHours,
+    duty_cycle: input.dutyCycle,
+  }
+}
+
+/** Maps `POST /calculations`'s `ChainSelectionResult` onto the
+ * frontend's `CalculationResult` shape (Sprint 6) so the existing
+ * result cards and recommendation card need no changes. */
+export function adaptCalculationResult(result: ChainSelectionResult): CalculationResult {
+  return {
+    resultCards: result.result_cards.map((card) => ({
+      id: card.id,
+      title: card.title,
+      value: card.value,
+      unit: card.unit ?? undefined,
+      status: card.status,
+    })),
+    recommendation: {
+      chainId: result.recommendation.chain_id,
+      chainLabel: result.recommendation.chain_label,
+      reason: result.recommendation.reason,
+      expectedLifeLabel: result.recommendation.expected_life_label,
+      explanation: result.recommendation.explanation,
+    },
   }
 }

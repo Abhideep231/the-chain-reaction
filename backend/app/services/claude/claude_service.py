@@ -1,7 +1,15 @@
-"""Claude API integration service — the single source of RAG answer
-generation. Single-turn Claude calls, threaded with session-scoped
-conversation memory (Sprint 18): no streaming, no prompt caching, no
-agent framework.
+"""Claude API integration service — the single source of Claude answer
+generation for the whole app. Two entry points share the same client
+resolution and provider-error mapping:
+
+- `ask()` — single-turn RAG Q&A, threaded with session-scoped
+  conversation memory (Sprint 18): retrieval-grounded answers with
+  citations. No streaming, no prompt caching, no agent framework.
+- `explain_calculation()` (Sprint 19) — explains an already-computed
+  engineering calculation result in plain language. Claude never
+  performs, checks, or adjusts the arithmetic itself; the calculation
+  engine (`app.services.calculations.chain_selection`) has already
+  produced every number by the time Claude sees it.
 
     Question -> Conversation Context -> Query Embedding ->
     Semantic Retrieval -> Top Relevant Chunks -> Prompt Builder ->
@@ -23,10 +31,15 @@ from anthropic import (
     RateLimitError,
     RequestTooLargeError,
 )
-from anthropic.types import MessageParam
+from anthropic.types import Message, MessageParam
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
+from app.services.calculations.models import ChainSelectionInput, ChainSelectionResult
+from app.services.claude.calculation_prompt_builder import (
+    CALCULATION_EXPLANATION_SYSTEM_PROMPT,
+    build_calculation_explanation_message,
+)
 from app.services.claude.exceptions import (
     ClaudeApiError,
     ClaudeAuthenticationError,
@@ -63,6 +76,57 @@ def _build_snippet(chunk_text: str) -> str:
     if len(stripped) <= CITATION_SNIPPET_MAX_CHARS:
         return stripped
     return stripped[:CITATION_SNIPPET_MAX_CHARS].rstrip() + "…"
+
+
+def _resolve_client(client: Anthropic | None, settings: Settings) -> Anthropic:
+    """Return `client` unchanged, or build one from settings if none
+    was supplied — the one place a real network client gets created,
+    shared by every entry point in this service.
+    """
+    if client is not None:
+        return client
+    if not settings.anthropic_api_key:
+        raise MissingApiKeyError(
+            "ANTHROPIC_API_KEY is not configured; Claude integration requires it."
+        )
+    return Anthropic(api_key=settings.anthropic_api_key)
+
+
+def _create_message(
+    client: Anthropic,
+    *,
+    model: str,
+    max_tokens: int,
+    temperature: float,
+    system: str,
+    messages: list[MessageParam],
+) -> Message:
+    """Call the Anthropic API, mapping provider errors to the domain
+    exceptions shared by every Claude entry point in this service.
+    """
+    try:
+        return client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            system=system,
+            messages=messages,
+        )
+    except RateLimitError as exc:
+        logger.warning("claude request failed: reason=rate_limited error=%s", exc)
+        raise ClaudeRateLimitError("Anthropic rate limit exceeded.") from exc
+    except APITimeoutError as exc:
+        logger.warning("claude request failed: reason=timeout error=%s", exc)
+        raise ClaudeTimeoutError("The request to Claude timed out.") from exc
+    except AuthenticationError as exc:
+        logger.warning("claude request failed: reason=authentication error=%s", exc)
+        raise ClaudeAuthenticationError("Anthropic rejected the configured API key.") from exc
+    except RequestTooLargeError as exc:
+        logger.warning("claude request failed: reason=prompt_too_large error=%s", exc)
+        raise PromptTooLargeError("The built prompt exceeded Claude's request size limit.") from exc
+    except APIError as exc:
+        logger.warning("claude request failed: reason=api_error error=%s", exc)
+        raise ClaudeApiError(f"Claude API error: {exc}") from exc
 
 
 def ask(
@@ -117,12 +181,7 @@ def ask(
     if not retrieval_response.results:
         raise EmptyRetrievalError("No relevant document chunks were found for this question.")
 
-    if client is None:
-        if not settings.anthropic_api_key:
-            raise MissingApiKeyError(
-                "ANTHROPIC_API_KEY is not configured; Claude integration requires it."
-            )
-        client = Anthropic(api_key=settings.anthropic_api_key)
+    client = _resolve_client(client, settings)
 
     user_message = build_user_message(question, retrieval_response.results)
     history_messages: list[MessageParam] = [
@@ -139,30 +198,14 @@ def ask(
         resolved_session_id,
         len(history),
     )
-    try:
-        message = client.messages.create(
-            model=settings.claude_model,
-            max_tokens=settings.claude_max_tokens,
-            temperature=settings.claude_temperature,
-            system=SYSTEM_PROMPT,
-            messages=messages,
-        )
-    except RateLimitError as exc:
-        logger.warning("claude request failed: reason=rate_limited error=%s", exc)
-        raise ClaudeRateLimitError("Anthropic rate limit exceeded.") from exc
-    except APITimeoutError as exc:
-        logger.warning("claude request failed: reason=timeout error=%s", exc)
-        raise ClaudeTimeoutError("The request to Claude timed out.") from exc
-    except AuthenticationError as exc:
-        logger.warning("claude request failed: reason=authentication error=%s", exc)
-        raise ClaudeAuthenticationError("Anthropic rejected the configured API key.") from exc
-    except RequestTooLargeError as exc:
-        logger.warning("claude request failed: reason=prompt_too_large error=%s", exc)
-        raise PromptTooLargeError("The built prompt exceeded Claude's request size limit.") from exc
-    except APIError as exc:
-        logger.warning("claude request failed: reason=api_error error=%s", exc)
-        raise ClaudeApiError(f"Claude API error: {exc}") from exc
-
+    message = _create_message(
+        client,
+        model=settings.claude_model,
+        max_tokens=settings.claude_max_tokens,
+        temperature=settings.claude_temperature,
+        system=SYSTEM_PROMPT,
+        messages=messages,
+    )
     logger.info("claude response received: stop_reason=%s", message.stop_reason)
 
     answer = "".join(block.text for block in message.content if block.type == "text")
@@ -203,3 +246,43 @@ def ask(
         session_id=resolved_session_id,
         model=settings.claude_model,
     )
+
+
+def explain_calculation(
+    chain_input: ChainSelectionInput,
+    result: ChainSelectionResult,
+    client: Anthropic | None = None,
+) -> str:
+    """Ask Claude to explain an already-computed calculation result in
+    plain engineering language. Claude receives the inputs and the
+    result exactly as the calculation engine computed them — it never
+    performs, checks, or adjusts any of the arithmetic itself.
+
+    `client` is injectable, matching every other entry point in this
+    service.
+
+    Raises:
+        MissingApiKeyError: no client was given and ANTHROPIC_API_KEY is unset.
+        ClaudeAuthenticationError: the provider rejected the API key.
+        ClaudeRateLimitError: the provider's rate limit was exceeded.
+        ClaudeTimeoutError: the request to the provider timed out.
+        PromptTooLargeError: the built prompt exceeded the provider's size limit.
+        ClaudeApiError: any other provider-side failure.
+    """
+    settings = get_settings()
+    client = _resolve_client(client, settings)
+
+    user_message = build_calculation_explanation_message(chain_input, result)
+
+    logger.info("calculation explanation request started: model=%s", settings.claude_model)
+    message = _create_message(
+        client,
+        model=settings.claude_model,
+        max_tokens=settings.claude_max_tokens,
+        temperature=settings.claude_temperature,
+        system=CALCULATION_EXPLANATION_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_message}],
+    )
+    logger.info("calculation explanation received: stop_reason=%s", message.stop_reason)
+
+    return "".join(block.text for block in message.content if block.type == "text")

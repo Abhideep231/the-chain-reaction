@@ -10,8 +10,11 @@ similarity search over that store; Sprint 15 added single-turn RAG
 answer generation via Claude on top of that retrieval; Sprint 17 added
 source citations with a text snippet per citation; Sprint 18 added
 session-scoped conversation memory so follow-up questions resolve
-against the current conversation. Calculation logic and authentication
-are still not implemented — those are built in future sprints.
+against the current conversation; Sprint 19 added a deterministic
+engineering calculation engine (roller chain selection) with an
+optional Claude explanation of the already-computed result. Claude
+never performs a calculation anywhere in this codebase. Authentication
+is still not implemented — that's built in a future sprint.
 
 ## Requirements
 
@@ -85,11 +88,12 @@ backend/
 │   │   │                 # implemented
 │   │   ├── retrieval/    # retrieval_service.py + models.py + exceptions.py —
 │   │   │                 # implemented
-│   │   ├── claude/       # claude_service.py + prompt_builder.py + models.py +
-│   │   │                 # exceptions.py — implemented. calculations remains empty,
-│   │   │                 # for a future sprint
-│   │   └── conversation/ # conversation_service.py + models.py + exceptions.py —
-│   │                     # in-memory, session-scoped chat history (Sprint 18)
+│   │   ├── claude/       # claude_service.py + prompt_builder.py +
+│   │   │                 # calculation_prompt_builder.py + models.py + exceptions.py
+│   │   ├── conversation/ # conversation_service.py + models.py + exceptions.py —
+│   │   │                 # in-memory, session-scoped chat history (Sprint 18)
+│   │   └── calculations/ # chain_selection.py + models.py + exceptions.py —
+│   │                     # deterministic engineering calculations (Sprint 19)
 │   ├── schemas/          # Pydantic request/response models, one module per resource
 │   │                     # (pdf.py holds the parser's structured output schemas; the
 │   │                     # chunker's, embedding service's, vector store's, and retrieval
@@ -122,7 +126,7 @@ backend/
 | POST   | `/documents/retrieve`| **Real** — semantic similarity search over stored vectors (see below) |
 | POST   | `/chat`              | Placeholder — returns a fixed reply (unrelated legacy schema; superseded by the session memory on `/chat/ask` below) |
 | POST   | `/chat/ask`          | **Real** — RAG (retrieval + Claude) with session-scoped conversation memory (see below) |
-| POST   | `/calculations`      | Placeholder — returns `status: "not_implemented"`             |
+| POST   | `/calculations`      | **Real** — deterministic roller-chain selection, plus an optional Claude explanation (see below) |
 | GET    | `/admin/status`      | Returns app status plus process uptime                        |
 
 Every endpoint is fully typed (Pydantic request/response models,
@@ -542,6 +546,114 @@ Every stage (question received, retrieval started/completed, Claude
 request started, Claude response received, answer generated with
 execution time) is logged via the centralized logger. API keys are
 never logged.
+
+## Engineering calculations (`POST /calculations`)
+
+A completely separate service from the RAG pipeline above — it shares
+nothing with parsing, chunking, embedding, retrieval, or conversation
+memory. **Claude never calculates anything here, or anywhere else in
+this codebase.** Every number in a calculation result comes from pure
+Python arithmetic (`app/services/calculations/chain_selection.py`);
+Claude, when available, only explains a result that has already been
+fully computed.
+
+```
+User Input
+     |
+Validation
+     |
+Calculation Engine        (pure Python — app/services/calculations/chain_selection.py)
+     |
+Calculated Result
+     |
+Claude Explanation        (optional — app/services/claude/claude_service.explain_calculation)
+     |
+Frontend
+```
+
+### Chain selection
+
+Sprint 19's one supported `calculation_type`. Ported 1:1 from the
+Sprint 6 frontend prototype (`src/lib/calculation-mock.ts`), so the
+real engine returns exactly the numbers the UI has shown since Sprint
+6 — this sprint makes the formula real and server-side; it does not
+change what it computes. Simplified, illustrative roller-chain
+relationships (chain speed, tension from power and from torque, safety
+factor against tensile strength, bearing pressure, an empirical
+wear-life estimate), not certification-grade engineering.
+
+Given drive conditions (pitch, tooth count, RPM, power, torque,
+service factor, shock load, temperature, lubrication, duty cycle), it
+selects the smallest suitable chain from a small representative
+ISO 606 spec table (moving up in size only, never down, since a
+smaller pitch wouldn't fit an existing sprocket), then computes chain
+speed, required tension, safety factor, bearing pressure, efficiency,
+and an estimated service life.
+
+### Validation
+
+Every numeric input is checked against the exact same min/max bounds
+already enforced on that field's `<input>` in
+`src/components/calculations/calculation-workspace.tsx` — that UI is
+the authoritative source for this domain's valid ranges, so the
+backend validates against the same bounds rather than inventing new
+ones (e.g. `pitch` 4-50mm, `number_of_teeth` 9-120, `power_kw` at least
+0.1). A missing field is already rejected by Pydantic before the
+calculation engine ever runs; an invalid categorical value (an
+unrecognized chain type, shock load, lubrication, or duty cycle) is
+rejected the same way, since each is a closed `Literal` type. Nothing
+is ever silently corrected — every rejection returns `422
+Unprocessable Entity` with the specific field and valid range.
+
+### API contract
+
+Sprint 19 redesigns `CalculationRequest`/`CalculationResponse` — the
+original placeholder shape (`inputs: dict[str, float]`) could not
+represent this domain at all: half the real inputs are categorical
+strings, not floats, and the result is a structured set of labeled
+cards plus a recommendation, not a flat float map. `calculation_type`
+is kept as a field for continuity with the placeholder, now a closed
+`Literal["chain_selection"]` rather than an arbitrary string. When a
+second calculation type is added, `inputs` becomes a discriminated
+union keyed on `calculation_type`; introducing that union for a single
+supported type today would be speculative, so it's deferred until a
+second type actually exists.
+
+```json
+// POST /calculations
+{ "calculation_type": "chain_selection",
+  "inputs": { "chain_type": "Roller Chain", "chain_standard": "ISO 606",
+    "pitch": 12.7, "number_of_teeth": 19, "driver_rpm": 1450, "driven_rpm": 500,
+    "power_kw": 7.5, "torque": 50, "service_factor": 1.5, "shock_load": "Moderate",
+    "temperature": 25, "lubrication": "Oil Bath", "operating_hours": 16,
+    "duty_cycle": "Continuous" } }
+
+// 200 OK
+{ "calculation_type": "chain_selection",
+  "result": { "result_cards": [ { "id", "title", "value", "unit", "status" } ],
+    "recommendation": { "chain_id", "chain_label", "reason", "expected_life_label",
+      "explanation": [ /* 4 strings */ ] } },
+  "explanation": "..." }
+```
+
+`explanation` is Claude's plain-language interpretation of `result` —
+`null` whenever Claude isn't available (no `ANTHROPIC_API_KEY`, a rate
+limit, a timeout, any other provider-side failure). A missing
+explanation is never treated as a failed calculation: `result` above
+is already correct and complete on its own, and the endpoint still
+returns `200` with `explanation: null` in that case. Claude's system
+prompt for this call explicitly forbids recalculating, re-deriving, or
+contradicting any supplied number.
+
+Error handling:
+
+| Failure                                   | Status                    |
+| ------------------------------------------ | ------------------------- |
+| Unrecognized `calculation_type`, or a missing/malformed field | 422 Unprocessable Entity (Pydantic) |
+| A numeric input outside its valid range    | 422 Unprocessable Entity  |
+
+Every stage (calculation started, chain selected, explanation
+requested/unavailable) is logged via the centralized logger.
 
 ## Verification
 
