@@ -188,3 +188,69 @@ export interface AskResponse {
   model: string
   session_id: string
 }
+
+// ---- app/services/calculations/models.py ----
+
+export type ApiChainType =
+  | "Roller Chain"
+  | "Conveyor Chain"
+  | "Attachment Chain"
+  | "Engineering Class Chain"
+export type ApiChainStandard = "ISO 606" | "ANSI B29.1"
+export type ApiShockLoad = "None" | "Moderate" | "Heavy"
+export type ApiLubricationType = "Manual" | "Drip" | "Oil Bath" | "Forced Circulation"
+export type ApiDutyCycle = "Continuous" | "Intermittent" | "Occasional"
+export type ApiResultStatus = "good" | "warning" | "critical"
+
+export interface ChainSelectionInput {
+  chain_type: ApiChainType
+  chain_standard: ApiChainStandard
+  pitch: number
+  number_of_teeth: number
+  driver_rpm: number
+  driven_rpm: number
+  power_kw: number
+  torque: number
+  service_factor: number
+  shock_load: ApiShockLoad
+  temperature: number
+  lubrication: ApiLubricationType
+  operating_hours: number
+  duty_cycle: ApiDutyCycle
+}
+
+export interface ApiResultCard {
+  id: string
+  title: string
+  value: string
+  unit: string | null
+  status: ApiResultStatus
+}
+
+export interface ApiRecommendation {
+  chain_id: string
+  chain_label: string
+  reason: string
+  expected_life_label: string
+  explanation: string[]
+}
+
+export interface ChainSelectionResult {
+  result_cards: ApiResultCard[]
+  recommendation: ApiRecommendation
+}
+
+// ---- app/schemas/calculations.py ----
+
+export type CalculationType = "chain_selection"
+
+export interface CalculationRequest {
+  calculation_type: CalculationType
+  inputs: ChainSelectionInput
+}
+
+export interface CalculationResponse {
+  calculation_type: CalculationType
+  result: ChainSelectionResult
+  explanation: string | null
+}

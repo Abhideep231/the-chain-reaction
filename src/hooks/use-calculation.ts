@@ -2,21 +2,28 @@
 
 import * as React from "react"
 
-import {
-  LOADING_STEPS,
-  defaultCalculationInput,
-  getCalculationSummary,
-  runMockCalculation,
-} from "@/lib/calculation-mock"
+import { adaptCalculationInput, adaptCalculationResult } from "@/lib/api/adapters"
+import { runChainSelectionCalculation } from "@/lib/api/calculations"
+import { friendlyErrorMessage } from "@/lib/api/errors"
+import { LOADING_STEPS, defaultCalculationInput } from "@/lib/calculation-mock"
 import type {
   CalculationInput,
   CalculationResult,
   CalculationSummary,
 } from "@/types/calculation"
 
-export type CalculationStatus = "idle" | "loading" | "complete"
+export type CalculationStatus = "idle" | "loading" | "complete" | "error"
 
 const STEP_DELAY_MS = 450
+
+const COMPLETED_STEPS = [
+  "Input Validation",
+  "Load Calculation",
+  "Safety Factor",
+  "Chain Selection",
+  "Life Estimation",
+  "Final Recommendation",
+]
 
 export function useCalculation() {
   const [input, setInput] = React.useState<CalculationInput>(
@@ -26,6 +33,8 @@ export function useCalculation() {
   const [currentStepIndex, setCurrentStepIndex] = React.useState(0)
   const [result, setResult] = React.useState<CalculationResult | null>(null)
   const [summary, setSummary] = React.useState<CalculationSummary | null>(null)
+  const [explanation, setExplanation] = React.useState<string | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
 
   const updateField = React.useCallback(
     <K extends keyof CalculationInput>(field: K, value: CalculationInput[K]) => {
@@ -38,40 +47,35 @@ export function useCalculation() {
     setStatus("loading")
     setResult(null)
     setSummary(null)
+    setExplanation(null)
+    setError(null)
     setCurrentStepIndex(0)
 
+    // Purely a progress animation while the real (fast, but genuinely
+    // asynchronous) backend call is in flight — cleared the moment a
+    // real response or error arrives, never gating it.
     const timeouts: number[] = LOADING_STEPS.map((_, index) =>
       window.setTimeout(() => setCurrentStepIndex(index), index * STEP_DELAY_MS)
     )
+    const startedAt = performance.now()
 
-    const finalTimeout = window.setTimeout(
-      () => {
-        // Sprint 16 (frontend-backend integration) deliberately left this
-        // on the local engine: the real POST /calculations is still a
-        // non-functional placeholder (always returns
-        // {status: "not_implemented", result: null}, see
-        // backend/app/api/routes/calculations.py) with no engineering
-        // formulas behind it. Wiring this call to that endpoint would
-        // replace a working feature with one that always fails.
-        const calculationResult = runMockCalculation(input)
-        setResult(calculationResult)
-        setSummary(
-          getCalculationSummary([
-            "Input Validation",
-            "Load Calculation",
-            "Safety Factor",
-            "Chain Selection",
-            "Life Estimation",
-            "Final Recommendation",
-          ])
-        )
+    runChainSelectionCalculation(adaptCalculationInput(input))
+      .then((response) => {
+        timeouts.forEach((id) => window.clearTimeout(id))
+        setCurrentStepIndex(LOADING_STEPS.length - 1)
+        setResult(adaptCalculationResult(response.result))
+        setSummary({
+          completedSteps: COMPLETED_STEPS,
+          executionTimeMs: Math.round(performance.now() - startedAt),
+        })
+        setExplanation(response.explanation)
         setStatus("complete")
-      },
-      LOADING_STEPS.length * STEP_DELAY_MS
-    )
-    timeouts.push(finalTimeout)
-
-    return () => timeouts.forEach((id) => window.clearTimeout(id))
+      })
+      .catch((caught: unknown) => {
+        timeouts.forEach((id) => window.clearTimeout(id))
+        setError(friendlyErrorMessage(caught))
+        setStatus("error")
+      })
   }, [input])
 
   return {
@@ -81,6 +85,8 @@ export function useCalculation() {
     currentStepIndex,
     result,
     summary,
+    explanation,
+    error,
     runCalculation,
   }
 }

@@ -47,9 +47,6 @@ export function SummaryPanel({
                   label: "Execution Time",
                   value: `${summary.executionTimeMs.toLocaleString("en-US")} ms`,
                 },
-                { label: "Calculation Version", value: summary.calculationVersion },
-                { label: "Formula Version", value: summary.formulaVersion },
-                { label: "Last Updated", value: summary.lastUpdated },
               ]}
             />
           </section>

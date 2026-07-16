@@ -1,1 +1,1 @@
-"""Engineering calculation service. Implemented in a future sprint."""
+"""Engineering calculation service — see chain_selection.py."""

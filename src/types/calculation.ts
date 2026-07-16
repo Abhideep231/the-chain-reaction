@@ -52,10 +52,13 @@ export interface CalculationResult {
   recommendation: Recommendation
 }
 
+/** `calculationVersion`/`formulaVersion`/`lastUpdated` (Sprint 6 mock)
+ * were dropped in Sprint 19 — the real backend has no engine or
+ * formula versioning concept, and inventing one would fabricate data
+ * alongside a now-genuine calculation result. Both remaining fields are
+ * real: `completedSteps` describes the actual stages the backend ran,
+ * `executionTimeMs` is the measured round-trip time of the real call. */
 export interface CalculationSummary {
   completedSteps: string[]
   executionTimeMs: number
-  calculationVersion: string
-  formulaVersion: string
-  lastUpdated: string
 }
