@@ -1,14 +1,16 @@
 """Claude API integration service — the single source of RAG answer
-generation. Single-turn only: no streaming, no conversation memory, no
-prompt caching, no agent framework.
+generation. Single-turn Claude calls, threaded with session-scoped
+conversation memory (Sprint 18): no streaming, no prompt caching, no
+agent framework.
 
-    User Question -> Query Embedding -> Semantic Retrieval ->
-    Top Relevant Chunks -> Prompt Builder -> Claude API ->
-    Final Answer -> Return Sources
+    Question -> Conversation Context -> Query Embedding ->
+    Semantic Retrieval -> Top Relevant Chunks -> Prompt Builder ->
+    Claude API -> Final Answer -> Return Sources
 
 Retrieval and query embedding are reused as-is from Sprints 12 and 14
 (`app.services.retrieval.retrieval_service.retrieve`) — this module
-adds only the prompt construction and Claude call on top.
+adds only conversation memory, prompt construction, and the Claude call
+on top.
 """
 
 import time
@@ -21,6 +23,7 @@ from anthropic import (
     RateLimitError,
     RequestTooLargeError,
 )
+from anthropic.types import MessageParam
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -35,6 +38,10 @@ from app.services.claude.exceptions import (
 )
 from app.services.claude.models import AskResponse, Citation
 from app.services.claude.prompt_builder import SYSTEM_PROMPT, build_user_message
+from app.services.conversation.conversation_service import (
+    build_retrieval_query,
+    get_conversation_store,
+)
 from app.services.retrieval.retrieval_service import retrieve
 
 logger = get_logger(__name__)
@@ -58,15 +65,23 @@ def _build_snippet(chunk_text: str) -> str:
     return stripped[:CITATION_SNIPPET_MAX_CHARS].rstrip() + "…"
 
 
-def ask(question: str, client: Anthropic | None = None) -> AskResponse:
-    """Answer `question` using single-turn RAG: retrieve relevant chunks,
-    build a context-grounded prompt, and ask Claude to answer from it.
+def ask(
+    question: str, session_id: str | None = None, client: Anthropic | None = None
+) -> AskResponse:
+    """Answer `question` using RAG grounded in the current document set,
+    plus this session's recent conversation history: resolve the
+    session, retrieve relevant chunks (using recent questions to
+    disambiguate a pronoun-dependent follow-up), build a
+    context-grounded prompt, and ask Claude to answer from it and the
+    prior turns.
 
     `client` is injectable so callers (and tests) can supply a
     pre-configured or fake Anthropic client instead of one built from
     settings — the service never reads a global client singleton.
 
     Raises:
+        InvalidSessionIdError: `session_id` was supplied but is blank or
+            unreasonably long.
         EmptyRetrievalError: no relevant document chunks were found.
         MissingApiKeyError: no client was given and ANTHROPIC_API_KEY is unset.
         ClaudeAuthenticationError: the provider rejected the API key.
@@ -82,11 +97,21 @@ def ask(question: str, client: Anthropic | None = None) -> AskResponse:
     used by /documents/retrieve and /documents/embed.
     """
     settings = get_settings()
-    logger.info("question received: question=%r", question)
+    store = get_conversation_store()
+    resolved_session_id = store.start_or_validate_session(session_id)
+    history = store.get_history(resolved_session_id)
+
+    logger.info(
+        "question received: session_id=%s question=%r history_turns=%d",
+        resolved_session_id,
+        question,
+        len(history),
+    )
     start = time.monotonic()
 
-    logger.info("retrieval started: question=%r", question)
-    retrieval_response = retrieve(question, top_k=CONTEXT_TOP_K)
+    retrieval_query = build_retrieval_query(history, question)
+    logger.info("retrieval started: session_id=%s query=%r", resolved_session_id, retrieval_query)
+    retrieval_response = retrieve(retrieval_query, top_k=CONTEXT_TOP_K)
     logger.info("retrieval completed: results=%d", len(retrieval_response.results))
 
     if not retrieval_response.results:
@@ -100,15 +125,27 @@ def ask(question: str, client: Anthropic | None = None) -> AskResponse:
         client = Anthropic(api_key=settings.anthropic_api_key)
 
     user_message = build_user_message(question, retrieval_response.results)
+    history_messages: list[MessageParam] = [
+        {"role": turn.role, "content": turn.content} for turn in history
+    ]
+    messages: list[MessageParam] = [
+        *history_messages,
+        {"role": "user", "content": user_message},
+    ]
 
-    logger.info("claude request started: model=%s", settings.claude_model)
+    logger.info(
+        "claude request started: model=%s session_id=%s history_turns=%d",
+        settings.claude_model,
+        resolved_session_id,
+        len(history),
+    )
     try:
         message = client.messages.create(
             model=settings.claude_model,
             max_tokens=settings.claude_max_tokens,
             temperature=settings.claude_temperature,
             system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_message}],
+            messages=messages,
         )
     except RateLimitError as exc:
         logger.warning("claude request failed: reason=rate_limited error=%s", exc)
@@ -147,9 +184,12 @@ def ask(question: str, client: Anthropic | None = None) -> AskResponse:
     # the kind of unsupported, hallucinated value this service must avoid.
     confidence = max(result.similarity_score for result in retrieval_response.results)
 
+    store.append_exchange(resolved_session_id, question, answer)
+
     duration_ms = (time.monotonic() - start) * 1000
     logger.info(
-        "answer generated: question=%r citations=%d confidence=%.4f duration_ms=%.1f",
+        "answer generated: session_id=%s question=%r citations=%d confidence=%.4f duration_ms=%.1f",
+        resolved_session_id,
         question,
         len(citations),
         confidence,
@@ -160,5 +200,6 @@ def ask(question: str, client: Anthropic | None = None) -> AskResponse:
         citations=citations,
         confidence=confidence,
         response_time_ms=duration_ms,
+        session_id=resolved_session_id,
         model=settings.claude_model,
     )
