@@ -2,10 +2,13 @@ import type {
   AskResponse,
   ChainSelectionInput,
   ChainSelectionResult,
+  DocumentListResponse,
   DocumentSummary,
+  VectorStoreStatus,
 } from "@/lib/api/types"
 import type { Citation, EngineeringAnswer, RetrievedDocument } from "@/types/chat"
 import type { CalculationInput, CalculationResult } from "@/types/calculation"
+import type { ActivityItem, Metric, StatusBreakdownItem } from "@/types/dashboard"
 import type { LibraryDocument } from "@/types/library"
 import type { ConfidenceLevel } from "@/types/shared"
 
@@ -159,4 +162,89 @@ export function adaptCalculationResult(result: ChainSelectionResult): Calculatio
       explanation: result.recommendation.explanation,
     },
   }
+}
+
+/** No historical time series exists anywhere in the backend (every
+ * endpoint reports current state, not a logged trend) — an honest
+ * "no comparison available" delta for a metric backed by real current
+ * data, rather than a fabricated change figure. */
+const NO_HISTORY_DELTA = { value: "—", direction: "flat", isPositive: true } as const
+
+/** Real count from `GET /documents`'s `total` (Sprint 20/21) — `null`
+ * while the request is in flight or has failed, rendered as "—" rather
+ * than a stale or invented number. */
+export function adaptTotalDocumentsMetric(
+  documentsResponse: DocumentListResponse | null
+): Metric {
+  return {
+    id: "total-documents",
+    label: "Total Documents",
+    value: documentsResponse ? documentsResponse.total.toLocaleString("en-US") : "—",
+    delta: NO_HISTORY_DELTA,
+  }
+}
+
+/** Real vector count from `GET /vectorstore/status` — one embedded
+ * chunk is one indexed passage. */
+export function adaptIndexedPassagesMetric(
+  vectorStoreStatus: VectorStoreStatus | null
+): Metric {
+  return {
+    id: "indexed-passages",
+    label: "Indexed Passages",
+    value: vectorStoreStatus ? vectorStoreStatus.total_vectors.toLocaleString("en-US") : "—",
+    delta: NO_HISTORY_DELTA,
+  }
+}
+
+/** Every document `GET /documents` returns is, by definition, fully
+ * indexed (see api/routes/documents.py) — there is no real "draft"
+ * concept in the backend, so that bucket is always genuinely 0, not
+ * fabricated. */
+export function adaptDocumentStatusBreakdown(
+  documentsResponse: DocumentListResponse | null
+): StatusBreakdownItem[] {
+  if (!documentsResponse) return []
+  return [
+    { label: "Approved", value: documentsResponse.total, status: "good" },
+    { label: "Draft", value: 0, status: "warning" },
+  ]
+}
+
+function formatRelativeTime(isoTimestamp: string): string {
+  const diffMinutes = Math.max(0, Math.round((Date.now() - new Date(isoTimestamp).getTime()) / 60_000))
+  if (diffMinutes < 1) return "Just now"
+  if (diffMinutes < 60) return `${diffMinutes} minute${diffMinutes === 1 ? "" : "s"} ago`
+  const diffHours = Math.round(diffMinutes / 60)
+  if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`
+  const diffDays = Math.round(diffHours / 24)
+  if (diffDays === 1) return "Yesterday"
+  return `${diffDays} days ago`
+}
+
+const RECENTLY_INDEXED_LIMIT = 4
+
+/** The 4 most recently stored real documents, newest first — derived
+ * entirely from `GET /documents`'s real `uploaded_at`/`page_count`/
+ * `chunk_count` (Sprint 20). A document with no `uploaded_at` (should
+ * not happen for anything the backend actually returns) is excluded
+ * rather than given a fabricated timestamp. */
+export function adaptRecentlyIndexed(
+  documentsResponse: DocumentListResponse | null
+): ActivityItem[] {
+  if (!documentsResponse) return []
+  return documentsResponse.documents
+    .filter((document): document is DocumentSummary & { uploaded_at: string } =>
+      Boolean(document.uploaded_at)
+    )
+    .sort(
+      (a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime()
+    )
+    .slice(0, RECENTLY_INDEXED_LIMIT)
+    .map((document) => ({
+      id: document.id,
+      title: document.filename,
+      subtitle: `${document.page_count ?? 0} pages · ${document.chunk_count} passages`,
+      timestamp: formatRelativeTime(document.uploaded_at),
+    }))
 }
