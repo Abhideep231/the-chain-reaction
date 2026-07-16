@@ -25,6 +25,8 @@ export function DocumentToolbar({
   onSortChange,
   viewMode,
   onViewModeChange,
+  onRefresh,
+  isRefreshing,
 }: {
   search: string
   onSearchChange: (value: string) => void
@@ -32,6 +34,8 @@ export function DocumentToolbar({
   onSortChange: (value: LibrarySortOption) => void
   viewMode: LibraryViewMode
   onViewModeChange: (mode: LibraryViewMode) => void
+  onRefresh: () => void
+  isRefreshing: boolean
 }) {
   return (
     <div className="flex h-14 min-w-0 shrink-0 items-center gap-2 overflow-x-auto border-b px-4">
@@ -94,11 +98,17 @@ export function DocumentToolbar({
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label="Refresh">
-              <RefreshCwIcon />
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Refresh"
+              onClick={onRefresh}
+              disabled={isRefreshing}
+            >
+              <RefreshCwIcon className={cn(isRefreshing && "animate-spin")} />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Refresh isn&apos;t connected yet</TooltipContent>
+          <TooltipContent>Refresh documents</TooltipContent>
         </Tooltip>
       </div>
     </div>

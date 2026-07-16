@@ -15,6 +15,7 @@ from pathlib import Path
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
+from chromadb.types import Metadata
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -29,6 +30,7 @@ from app.services.vectorstore.models import (
     DeleteDocumentResult,
     QueryMatch,
     ResetDatabaseResult,
+    StoredDocumentSummary,
     StoreEmbeddingsResult,
     VectorStoreStatus,
 )
@@ -179,6 +181,46 @@ class VectorStoreService:
             collection_name=self.collection_name,
             database_path=self.db_path,
         )
+
+    def list_documents(self) -> list[StoredDocumentSummary]:
+        """Aggregate every stored chunk into one summary per document_id
+        — the Knowledge Library's real, canonical document list (Sprint
+        20). A document only appears here once it has been fully
+        stored; nothing midway through upload/chunk/embed is included,
+        since that data doesn't exist in the collection yet.
+
+        Returns an empty list if the collection doesn't exist yet —
+        not an error, same convention as `query_similar`.
+        """
+        if not self.collection_exists():
+            return []
+        collection = self._client.get_collection(name=self.collection_name)
+        if collection.count() == 0:
+            return []
+
+        metadatas = collection.get(include=["metadatas"])["metadatas"] or []
+        grouped: dict[str, list[Metadata]] = {}
+        for metadata in metadatas:
+            document_id = str(metadata.get("document_id", ""))
+            if not document_id:
+                continue
+            grouped.setdefault(document_id, []).append(metadata)
+
+        summaries = [
+            StoredDocumentSummary(
+                document_id=document_id,
+                filename=str(chunks[0].get("filename", "")),
+                chunk_count=len(chunks),
+                page_count=max(_metadata_int(chunk.get("page_number")) for chunk in chunks),
+                embedding_model=str(chunks[0].get("embedding_model", "")),
+                first_stored_at=min(
+                    datetime.fromisoformat(str(chunk.get("created_at"))) for chunk in chunks
+                ),
+            )
+            for document_id, chunks in grouped.items()
+        ]
+        logger.info("documents listed: total=%d", len(summaries))
+        return summaries
 
     def delete_document_embeddings(self, document_id: str) -> DeleteDocumentResult:
         if not self.collection_exists():

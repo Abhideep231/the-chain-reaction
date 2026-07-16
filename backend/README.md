@@ -12,8 +12,11 @@ source citations with a text snippet per citation; Sprint 18 added
 session-scoped conversation memory so follow-up questions resolve
 against the current conversation; Sprint 19 added a deterministic
 engineering calculation engine (roller chain selection) with an
-optional Claude explanation of the already-computed result. Claude
-never performs a calculation anywhere in this codebase. Authentication
+optional Claude explanation of the already-computed result; Sprint 20
+made the Knowledge Library real — `GET /documents` now lists actual
+indexed documents (aggregated from their stored chunks) instead of an
+always-empty placeholder, with real delete support. Claude never
+performs a calculation anywhere in this codebase. Authentication
 is still not implemented — that's built in a future sprint.
 
 ## Requirements
@@ -114,14 +117,14 @@ backend/
 | Method | Path                | Behavior                                                    |
 | ------ | ------------------- | ------------------------------------------------------------ |
 | GET    | `/health`            | Returns app status/name/version/environment                  |
-| GET    | `/documents`         | Placeholder — returns an empty document list                 |
+| GET    | `/documents`         | **Real** — lists documents, aggregated from their stored chunks (Sprint 20, see below) |
 | POST   | `/documents`         | Placeholder — echoes back upload metadata with a mock ID     |
 | POST   | `/documents/upload`  | **Real** — validates and parses an uploaded PDF (see below)   |
 | POST   | `/documents/chunk`   | **Real** — splits a parsed document into overlapping text chunks (see below) |
 | POST   | `/documents/embed`   | **Real** — generates OpenAI embeddings for a chunked document (see below) |
 | POST   | `/documents/store`   | **Real** — persists an EmbeddingResult into ChromaDB (see below) |
 | GET    | `/vectorstore/status`| **Real** — collection existence, vector count, model, health (see below) |
-| DELETE | `/vectorstore/document/{document_id}` | **Real** — deletes all vectors for one document |
+| DELETE | `/vectorstore/document/{document_id}` | **Real** — deletes a document's vectors and its uploaded PDF file (Sprint 20) — the Knowledge Library's delete action |
 | DELETE | `/vectorstore/reset` | **Real** — resets the entire vector database              |
 | POST   | `/documents/retrieve`| **Real** — semantic similarity search over stored vectors (see below) |
 | POST   | `/chat`              | Placeholder — returns a fixed reply (unrelated legacy schema; superseded by the session memory on `/chat/ask` below) |
@@ -290,7 +293,9 @@ vectors twice and re-storing with changed vectors for the same ids.
 POST   /documents/store                    → { stored_vectors, collection_name, database_path }
 GET    /vectorstore/status                  → { collection_exists, collection_name, total_vectors,
                                                  embedding_model, vector_dimension, database_path, health }
-DELETE /vectorstore/document/{document_id}  → { document_id, deleted_count }
+DELETE /vectorstore/document/{document_id}  → { document_id, deleted_count } — also removes the
+                                                document's uploaded PDF from UPLOAD_DIR (Sprint 20);
+                                                a missing file is not an error
 DELETE /vectorstore/reset                   → { status, collection_name }
 ```
 
@@ -318,6 +323,37 @@ collection doesn't exist yet (e.g. right after a reset).
 Every stage (storage started/completed with duration, collection
 created vs. reused, document deleted, database reset) is logged via
 the centralized logger.
+
+## Knowledge Library (`GET /documents`, Sprint 20)
+
+Lists real, fully-indexed documents — there is no separate documents
+database; a document's existence, filename, chunk count, and page
+count are all derived by aggregating its stored chunks
+(`VectorStoreService.list_documents`, grouping by `document_id`).
+`page_count` is the highest page number that produced a chunk, which
+agrees with the parser's own page count for anything that made it
+through chunking (chunking itself fails if any page has no
+extractable text). `file_size_bytes` comes from the uploaded PDF still
+on disk at `UPLOAD_DIR/{document_id}.pdf`, and is `null` — not an
+error — if that file is ever missing.
+
+A document only appears here once `/documents/store` has completed
+for it; nothing midway through upload/chunk/embed is included, since
+none of that is persisted. There is currently no intermediate
+"processing" or "failed" state to report for this reason — every
+listed document's `status` is `"indexed"`.
+
+```json
+// GET /documents
+// 200 OK
+{ "documents": [ { "id", "filename", "status": "indexed", "page_count",
+  "chunk_count", "file_size_bytes", "uploaded_at" } ], "total": 1 }
+```
+
+Deleting a document is `DELETE /vectorstore/document/{document_id}`
+(above) — the Knowledge Library's delete action lives under
+`/vectorstore` since it operates on the same per-document vector data,
+not a separate documents table.
 
 ## Semantic retrieval (`POST /documents/retrieve`)
 

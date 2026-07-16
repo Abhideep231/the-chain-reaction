@@ -66,13 +66,35 @@ export function adaptAskResponse(response: AskResponse): EngineeringAnswer {
   }
 }
 
-/** Maps `GET /documents`'s minimal `DocumentSummary` (id, filename,
- * status, page_count) onto the richer `LibraryDocument` shape the
- * Knowledge Library UI (Sprint 4) expects. The backend doesn't track
- * category, product family, revisions, tags, or notes for a document,
- * so those fields fall back to neutral placeholders rather than
- * fabricated values — this only runs at all once a real document
- * appears in a real (currently always-empty) listing. */
+const BYTE_UNITS = ["B", "KB", "MB", "GB"] as const
+
+function formatFileSize(bytes: number | null): string {
+  if (bytes === null) return "—"
+  if (bytes === 0) return "0 B"
+  const exponent = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    BYTE_UNITS.length - 1
+  )
+  const value = bytes / 1024 ** exponent
+  return `${exponent === 0 ? value : value.toFixed(1)} ${BYTE_UNITS[exponent]}`
+}
+
+function formatUploadedAt(isoTimestamp: string | null): string {
+  if (!isoTimestamp) return "—"
+  return new Date(isoTimestamp).toLocaleDateString("en-US", {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+  })
+}
+
+/** Maps `GET /documents`'s `DocumentSummary` onto the richer
+ * `LibraryDocument` shape the Knowledge Library UI (Sprint 4) expects.
+ * The backend doesn't track category, product family, revisions, tags,
+ * or notes for a document, so those fields fall back to neutral
+ * placeholders rather than fabricated values — everything else
+ * (file size, page count, chunk count, upload date, status) is real,
+ * derived from the document's actual stored chunks (Sprint 20). */
 export function adaptDocumentSummary(summary: DocumentSummary): LibraryDocument {
   return {
     id: summary.id,
@@ -82,10 +104,11 @@ export function adaptDocumentSummary(summary: DocumentSummary): LibraryDocument 
     documentType: "Manual",
     revision: "—",
     version: "—",
-    fileSize: "—",
+    fileSize: formatFileSize(summary.file_size_bytes),
     pageCount: summary.page_count ?? 0,
-    lastUpdated: "—",
-    status: summary.status.toLowerCase().includes("approved") ? "approved" : "draft",
+    chunkCount: summary.chunk_count,
+    lastUpdated: formatUploadedAt(summary.uploaded_at),
+    status: summary.status === "indexed" ? "approved" : "draft",
     previewKind: "manual",
     tags: [],
     engineeringNotes: "",

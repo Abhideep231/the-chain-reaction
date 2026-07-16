@@ -55,6 +55,9 @@ export interface DocumentSummary {
   filename: string
   status: string
   page_count: number | null
+  chunk_count: number
+  file_size_bytes: number | null
+  uploaded_at: string | null
 }
 
 export interface DocumentListResponse {
@@ -144,6 +147,11 @@ export interface VectorStoreStatus {
   vector_dimension: number | null
   database_path: string
   health: string
+}
+
+export interface DeleteDocumentResult {
+  document_id: string
+  deleted_count: number
 }
 
 // ---- app/services/retrieval/models.py ----
