@@ -4,10 +4,11 @@ FastAPI backend for The Chain Reaction, an AI-powered engineering
 intelligence platform. Sprint 9 built the modular, production-ready
 application skeleton; Sprint 10 added PDF upload and structured text/
 metadata extraction; Sprint 11 added recursive document chunking;
-Sprint 12 added OpenAI embedding generation; Sprint 13 adds local
-persistent vector storage (ChromaDB) for those embeddings. Semantic
-retrieval, Claude API, calculation logic, and authentication are still
-not implemented — those are built in future sprints.
+Sprint 12 added OpenAI embedding generation; Sprint 13 added local
+persistent vector storage (ChromaDB); Sprint 14 adds semantic
+similarity search over that store. Claude API, chat generation,
+calculation logic, and authentication are still not implemented —
+those are built in future sprints.
 
 ## Requirements
 
@@ -74,14 +75,15 @@ backend/
 │   │   ├── chunker/      # chunker.py + models.py + exceptions.py — implemented
 │   │   ├── embeddings/   # embedding_service.py (OpenAI) + models.py + exceptions.py —
 │   │   │                 # implemented
-│   │   └── vectorstore/  # vector_store.py (ChromaDB) + models.py + exceptions.py —
-│   │                     # implemented. retrieval, claude, calculations remain empty,
-│   │                     # for future sprints
+│   │   ├── vectorstore/  # vector_store.py (ChromaDB) + models.py + exceptions.py —
+│   │   │                 # implemented
+│   │   └── retrieval/    # retrieval_service.py + models.py + exceptions.py —
+│   │                     # implemented. claude, calculations remain empty, for future sprints
 │   ├── schemas/          # Pydantic request/response models, one module per resource
 │   │                     # (pdf.py holds the parser's structured output schemas; the
-│   │                     # chunker's, embedding service's, and vector store's own output
-│   │                     # models live in services/*/models.py, next to the code that
-│   │                     # builds them)
+│   │                     # chunker's, embedding service's, vector store's, and retrieval
+│   │                     # service's own output models live in services/*/models.py,
+│   │                     # next to the code that builds them)
 │   ├── models/           # Internal domain/DB models — empty until persistence ships
 │   ├── utils/            # Shared, stateless helpers
 │   ├── static/swagger-ui/# Vendored Swagger UI assets (see VENDORED.md)
@@ -106,6 +108,7 @@ backend/
 | GET    | `/vectorstore/status`| **Real** — collection existence, vector count, model, health (see below) |
 | DELETE | `/vectorstore/document/{document_id}` | **Real** — deletes all vectors for one document |
 | DELETE | `/vectorstore/reset` | **Real** — resets the entire vector database              |
+| POST   | `/documents/retrieve`| **Real** — semantic similarity search over stored vectors (see below) |
 | POST   | `/chat`              | Placeholder — returns a fixed reply                           |
 | POST   | `/calculations`      | Placeholder — returns `status: "not_implemented"`             |
 | GET    | `/admin/status`      | Returns app status plus process uptime                        |
@@ -299,6 +302,81 @@ collection doesn't exist yet (e.g. right after a reset).
 Every stage (storage started/completed with duration, collection
 created vs. reused, document deleted, database reset) is logged via
 the centralized logger.
+
+## Semantic retrieval (`POST /documents/retrieve`)
+
+Takes a natural-language query and returns the most similar stored
+chunks (`app/services/retrieval/retrieval_service.py`) — the single
+source of similarity search for the RAG pipeline. No Claude API, no
+prompt construction, no chat generation: retrieval only.
+
+```
+Embedding Vector
+      |
+   ChromaDB
+      |
+Similarity Search
+      |
+  Top-K Results
+      |
+    Metadata
+      |
+   REST API
+```
+
+Workflow:
+1. Validate the request (non-empty query, `top_k` in range).
+2. Embed the query — reuses the embedding service
+   (`generate_query_embedding`), with the **same embedding model used
+   at indexing time**, so query and stored vectors are directly
+   comparable. No model override is exposed on the request for this
+   reason: embedding a query with a different model than the one used
+   to index would make cosine distance meaningless.
+3. Query the vector store — reuses `VectorStoreService.query_similar`,
+   a nearest-neighbor search over the `chain_reaction_documents`
+   collection.
+4. Sort matches by similarity score (highest first) — computed
+   explicitly in code rather than assumed from ChromaDB's own result
+   ordering.
+5. Optionally filter by `similarity_threshold`.
+6. Return each match with its full source metadata.
+
+A query that matches nothing (empty vector store, or every match
+below `similarity_threshold`) is **not an error** — it returns `200`
+with an empty `results` list, since "no results" is a valid outcome of
+a search, not a failure.
+
+Request/response:
+```json
+// POST /documents/retrieve
+{ "query": "What is the required safety factor for a steel beam?", "top_k": 5 }
+
+// 200 OK
+{ "query": "...", "results": [ { "document_id", "chunk_id", "chunk_index",
+  "page_number", "similarity_score", "chunk_text",
+  "metadata": { "filename", "created_at" }, "embedding_model" } ] }
+```
+`top_k` defaults to 5 and must be between 1 and 100. `similarity_threshold`
+is optional; when set, only matches with `similarity_score >=
+similarity_threshold` are returned.
+
+The vector store's collection is created with `hnsw:space: cosine`
+(Sprint 14 addition to `VectorStoreService.create_collection` — cosine
+is the standard, documented comparison metric for OpenAI's embedding
+models), so `similarity_score = 1 - cosine_distance`.
+
+Error handling:
+
+| Failure                                    | Status                    |
+| -------------------------------------------- | --------------------------- |
+| Empty query                                  | 422 Unprocessable Entity   |
+| `top_k` outside 1-100                        | 422 Unprocessable Entity   |
+| Query embedding failure (missing key, invalid model, auth, rate limit, timeout, other API error) | same status as `/documents/embed` — the exact same exception types propagate unwrapped |
+| Vector store query fails (database error)    | 503 Service Unavailable    |
+
+Every stage (retrieval started, embedding generated, vector search
+started, matches found, retrieval completed with duration) is logged
+via the centralized logger.
 
 ## Verification
 

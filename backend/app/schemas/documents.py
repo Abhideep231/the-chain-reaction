@@ -38,3 +38,9 @@ class DocumentUploadResult(BaseModel):
 class ChunkRequest(BaseModel):
     document_id: str
     parse_result: PdfParseResult
+
+
+class RetrievalRequest(BaseModel):
+    query: str
+    top_k: int | None = None
+    similarity_threshold: float | None = None

@@ -4,7 +4,9 @@ creation for the RAG pipeline.
 Consumes the Chunk objects produced by the chunker (Sprint 11) and
 calls the OpenAI embeddings API to generate a vector for each one.
 Embeddings are returned in memory only; persistence is a future
-sprint's concern.
+sprint's concern. `generate_query_embedding` (Sprint 14) embeds a
+single natural-language query string for similarity search, sharing
+the same batched-call/error-mapping logic via `_embed_texts`.
 """
 
 import time
@@ -20,7 +22,7 @@ from openai import (
     RateLimitError,
 )
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
 from app.services.chunker.models import ChunkingResult
 from app.services.embeddings.exceptions import (
@@ -83,43 +85,9 @@ def generate_embeddings(
     )
     start = time.monotonic()
 
-    if client is None:
-        if not settings.openai_api_key:
-            raise MissingApiKeyError(
-                "OPENAI_API_KEY is not configured; embedding generation requires it."
-            )
-        client = OpenAI(api_key=settings.openai_api_key)
-
-    vectors: list[list[float]] = []
-    for batch_start in range(0, len(chunking_result.chunks), _BATCH_SIZE):
-        batch = chunking_result.chunks[batch_start : batch_start + _BATCH_SIZE]
-        texts = [chunk.text for chunk in batch]
-        try:
-            response = client.embeddings.create(model=embedding_model, input=texts)
-        except RateLimitError as exc:
-            logger.warning("embedding failed: reason=rate_limited error=%s", exc)
-            raise EmbeddingRateLimitError(
-                "OpenAI rate limit exceeded while generating embeddings."
-            ) from exc
-        except APITimeoutError as exc:
-            logger.warning("embedding failed: reason=timeout error=%s", exc)
-            raise EmbeddingTimeoutError("The embedding request to OpenAI timed out.") from exc
-        except AuthenticationError as exc:
-            logger.warning("embedding failed: reason=authentication error=%s", exc)
-            raise EmbeddingAuthenticationError(
-                "OpenAI rejected the configured API key."
-            ) from exc
-        except BadRequestError as exc:
-            logger.warning("embedding failed: reason=invalid_model error=%s", exc)
-            raise InvalidModelError(
-                f"'{embedding_model}' was rejected by OpenAI as an invalid embedding model."
-            ) from exc
-        except APIError as exc:
-            logger.warning("embedding failed: reason=api_error error=%s", exc)
-            raise EmbeddingApiError(f"OpenAI API error: {exc}") from exc
-
-        ordered = sorted(response.data, key=lambda item: item.index)
-        vectors.extend(item.embedding for item in ordered)
+    client = _resolve_client(client, settings)
+    texts = [chunk.text for chunk in chunking_result.chunks]
+    vectors = _embed_texts(texts, embedding_model, client)
 
     vector_dimension = len(vectors[0]) if vectors else 0
     created_at = datetime.now(UTC)
@@ -154,3 +122,76 @@ def generate_embeddings(
         vector_dimension=vector_dimension,
         embeddings=embeddings,
     )
+
+
+def generate_query_embedding(
+    query: str,
+    model: str | None = None,
+    client: OpenAI | None = None,
+) -> list[float]:
+    """Embed a single natural-language query string for similarity
+    search (Sprint 14's retrieval service).
+
+    Uses the same OpenAI call/error-mapping as `generate_embeddings`
+    via `_embed_texts`. Does not validate `query` itself (e.g. reject
+    blank text) — that is the caller's (retrieval service's) request
+    validation responsibility, so this stays a pure "embed this string"
+    primitive reusable outside a retrieval context too.
+
+    Raises the same provider-side exceptions as `generate_embeddings`.
+    """
+    settings = get_settings()
+    embedding_model = model or settings.embedding_model
+    client = _resolve_client(client, settings)
+    vectors = _embed_texts([query], embedding_model, client)
+    return vectors[0]
+
+
+def _resolve_client(client: OpenAI | None, settings: Settings) -> OpenAI:
+    """Return `client` unchanged, or build one from settings if none
+    was supplied — the one place a real network client gets created.
+    """
+    if client is not None:
+        return client
+    if not settings.openai_api_key:
+        raise MissingApiKeyError(
+            "OPENAI_API_KEY is not configured; embedding generation requires it."
+        )
+    return OpenAI(api_key=settings.openai_api_key)
+
+
+def _embed_texts(texts: list[str], embedding_model: str, client: OpenAI) -> list[list[float]]:
+    """Call the OpenAI embeddings API in batches, mapping provider
+    errors to domain exceptions. Returns vectors in the same order as
+    `texts`.
+    """
+    vectors: list[list[float]] = []
+    for batch_start in range(0, len(texts), _BATCH_SIZE):
+        batch = texts[batch_start : batch_start + _BATCH_SIZE]
+        try:
+            response = client.embeddings.create(model=embedding_model, input=batch)
+        except RateLimitError as exc:
+            logger.warning("embedding failed: reason=rate_limited error=%s", exc)
+            raise EmbeddingRateLimitError(
+                "OpenAI rate limit exceeded while generating embeddings."
+            ) from exc
+        except APITimeoutError as exc:
+            logger.warning("embedding failed: reason=timeout error=%s", exc)
+            raise EmbeddingTimeoutError("The embedding request to OpenAI timed out.") from exc
+        except AuthenticationError as exc:
+            logger.warning("embedding failed: reason=authentication error=%s", exc)
+            raise EmbeddingAuthenticationError(
+                "OpenAI rejected the configured API key."
+            ) from exc
+        except BadRequestError as exc:
+            logger.warning("embedding failed: reason=invalid_model error=%s", exc)
+            raise InvalidModelError(
+                f"'{embedding_model}' was rejected by OpenAI as an invalid embedding model."
+            ) from exc
+        except APIError as exc:
+            logger.warning("embedding failed: reason=api_error error=%s", exc)
+            raise EmbeddingApiError(f"OpenAI API error: {exc}") from exc
+
+        ordered = sorted(response.data, key=lambda item: item.index)
+        vectors.extend(item.embedding for item in ordered)
+    return vectors

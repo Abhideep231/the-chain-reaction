@@ -6,8 +6,10 @@ validates and parses an uploaded PDF via the parser service. POST
 text chunks via the chunker service. POST /documents/embed generates
 OpenAI embeddings for an already-chunked document via the embedding
 service. POST /documents/store persists an EmbeddingResult into
-ChromaDB via the vector store service — see api/routes/vectorstore.py
-for the collection-level status/delete/reset endpoints.
+ChromaDB via the vector store service. POST /documents/retrieve runs
+semantic similarity search via the retrieval service — see
+api/routes/vectorstore.py for the collection-level status/delete/reset
+endpoints.
 """
 
 import uuid
@@ -24,6 +26,7 @@ from app.schemas.documents import (
     DocumentUploadRequest,
     DocumentUploadResponse,
     DocumentUploadResult,
+    RetrievalRequest,
 )
 from app.services.chunker.chunker import chunk_document
 from app.services.chunker.exceptions import ChunkingError
@@ -43,6 +46,14 @@ from app.services.embeddings.exceptions import (
 from app.services.embeddings.models import EmbeddingResult
 from app.services.parser.exceptions import PdfParsingError
 from app.services.parser.pdf_parser import parse_pdf
+from app.services.retrieval.exceptions import (
+    EmptyQueryError,
+    InvalidTopKError,
+    RetrievalError,
+    VectorStoreUnavailableError,
+)
+from app.services.retrieval.models import RetrievalResponse
+from app.services.retrieval.retrieval_service import retrieve
 from app.services.vectorstore.exceptions import VectorStoreError
 from app.services.vectorstore.models import StoreEmbeddingsResult
 from app.services.vectorstore.vector_store import get_vector_store_service
@@ -56,6 +67,12 @@ _EMBEDDING_ERROR_STATUS: dict[type[EmbeddingError], int] = {
     EmbeddingRateLimitError: status.HTTP_429_TOO_MANY_REQUESTS,
     EmbeddingTimeoutError: status.HTTP_504_GATEWAY_TIMEOUT,
     EmbeddingApiError: status.HTTP_502_BAD_GATEWAY,
+}
+
+_RETRIEVAL_ERROR_STATUS: dict[type[RetrievalError], int] = {
+    EmptyQueryError: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    InvalidTopKError: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    VectorStoreUnavailableError: status.HTTP_503_SERVICE_UNAVAILABLE,
 }
 
 router = APIRouter(tags=["documents"])
@@ -173,3 +190,19 @@ def store_embeddings(request: EmbeddingResult) -> StoreEmbeddingsResult:
         return get_vector_store_service().store_embeddings(request)
     except VectorStoreError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+
+
+@router.post("/documents/retrieve", response_model=RetrievalResponse)
+def retrieve_chunks(request: RetrievalRequest) -> RetrievalResponse:
+    try:
+        return retrieve(request.query, request.top_k, request.similarity_threshold)
+    except RetrievalError as exc:
+        status_code = _RETRIEVAL_ERROR_STATUS.get(
+            type(exc), status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+        raise HTTPException(status_code, str(exc)) from exc
+    except EmbeddingError as exc:
+        status_code = _EMBEDDING_ERROR_STATUS.get(
+            type(exc), status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+        raise HTTPException(status_code, str(exc)) from exc

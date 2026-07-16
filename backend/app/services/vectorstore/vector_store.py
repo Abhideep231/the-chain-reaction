@@ -27,6 +27,7 @@ from app.services.vectorstore.exceptions import (
 )
 from app.services.vectorstore.models import (
     DeleteDocumentResult,
+    QueryMatch,
     ResetDatabaseResult,
     StoreEmbeddingsResult,
     VectorStoreStatus,
@@ -35,6 +36,17 @@ from app.services.vectorstore.models import (
 logger = get_logger(__name__)
 
 COLLECTION_NAME = "chain_reaction_documents"
+
+
+def _metadata_int(value: object) -> int:
+    """Safely coerce a ChromaDB metadata value to int, defaulting to 0
+    for anything that isn't already a plain number.
+    """
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    return 0
 
 
 class VectorStoreService:
@@ -58,6 +70,11 @@ class VectorStoreService:
         """Get-or-create the collection, tagging it with the given
         embedding model/dimension only if it doesn't already exist —
         an existing collection's metadata is never overwritten.
+
+        `hnsw:space` is fixed to cosine distance at creation time (it
+        cannot be changed afterward): cosine similarity is the standard,
+        documented comparison metric for OpenAI's embedding models, and
+        is what makes `query_similar`'s similarity_score meaningful.
         """
         existed = self.collection_exists()
         collection = self._client.get_or_create_collection(
@@ -66,6 +83,7 @@ class VectorStoreService:
                 "embedding_model": embedding_model,
                 "vector_dimension": vector_dimension,
                 "created_at": datetime.now(UTC).isoformat(),
+                "hnsw:space": "cosine",
             },
         )
         if existed:
@@ -207,6 +225,55 @@ class VectorStoreService:
             database_path=self.db_path,
             health=self.health_check(),
         )
+
+    def query_similar(self, query_embedding: Sequence[float], top_k: int) -> list[QueryMatch]:
+        """Return up to `top_k` nearest-neighbor matches for
+        `query_embedding`, ordered most similar first.
+
+        Returns an empty list if the collection doesn't exist yet
+        (nothing has ever been stored) — this is a valid, non-exceptional
+        state, not an error. `top_k` larger than the collection size is
+        handled gracefully by ChromaDB itself (returns however many
+        vectors exist).
+        """
+        if not self.collection_exists():
+            return []
+
+        collection = self._client.get_collection(name=self.collection_name)
+        query_vector: list[Sequence[float]] = [list(query_embedding)]
+        result = collection.query(
+            query_embeddings=query_vector,
+            n_results=top_k,
+            include=["metadatas", "documents", "distances"],
+        )
+
+        ids = result["ids"][0]
+        distances = result["distances"][0] if result["distances"] is not None else []
+        metadatas = result["metadatas"][0] if result["metadatas"] is not None else []
+        documents = result["documents"][0] if result["documents"] is not None else []
+
+        matches: list[QueryMatch] = []
+        for chunk_id, distance, metadata, document in zip(
+            ids, distances, metadatas, documents, strict=True
+        ):
+            matches.append(
+                QueryMatch(
+                    chunk_id=chunk_id,
+                    document_id=str(metadata.get("document_id", "")),
+                    chunk_index=_metadata_int(metadata.get("chunk_index")),
+                    page_number=_metadata_int(metadata.get("page_number")),
+                    filename=str(metadata.get("filename", "")),
+                    chunk_text=document or "",
+                    embedding_model=str(metadata.get("embedding_model", "")),
+                    vector_dimension=_metadata_int(metadata.get("vector_dimension")),
+                    created_at=datetime.fromisoformat(str(metadata.get("created_at"))),
+                    distance=distance,
+                    # The collection is created with hnsw:space=cosine, so
+                    # `distance` is cosine distance (1 - cosine similarity).
+                    similarity_score=1.0 - distance,
+                )
+            )
+        return matches
 
 
 @lru_cache

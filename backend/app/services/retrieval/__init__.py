@@ -1,1 +1,1 @@
-"""Retrieval (RAG query) service. Implemented in a future sprint."""
+"""Semantic retrieval service — see retrieval_service.py."""
