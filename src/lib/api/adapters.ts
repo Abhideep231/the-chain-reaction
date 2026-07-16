@@ -18,20 +18,26 @@ function toPercent(score: number): number {
 }
 
 /** Maps `POST /chat/ask`'s response onto the frontend's `EngineeringAnswer`
- * shape (Sprint 2) so the existing Ask AI UI needs no changes. The backend
- * doesn't return a chunk-text snippet on `ClaudeCitation` (only
- * document/page/chunk identifiers and a score), so `snippet` falls back to
- * a page reference rather than inventing quoted text that was never
- * returned. */
+ * shape (Sprint 2) so the existing Ask AI UI needs no changes. Citations
+ * are deduplicated by chunk id and kept in the order the backend (i.e.
+ * retrieval, ranked by similarity) returned them — retrieval shouldn't
+ * ever return the same chunk twice, but this keeps that guarantee out of
+ * the UI's hands regardless. */
 export function adaptAskResponse(response: AskResponse): EngineeringAnswer {
-  const citations: Citation[] = response.citations.map((citation) => ({
-    id: citation.chunk_id,
-    title: citation.filename,
-    source: citation.filename,
-    section: `Page ${citation.page_number}`,
-    snippet: `Retrieved from page ${citation.page_number}, chunk ${citation.chunk_id}.`,
-    relevance: toPercent(citation.similarity_score),
-  }))
+  const seenChunkIds = new Set<string>()
+  const citations: Citation[] = []
+  for (const citation of response.citations) {
+    if (seenChunkIds.has(citation.chunk_id)) continue
+    seenChunkIds.add(citation.chunk_id)
+    citations.push({
+      id: citation.chunk_id,
+      title: citation.filename,
+      source: citation.filename,
+      section: `Page ${citation.page_number}`,
+      snippet: citation.snippet,
+      relevance: toPercent(citation.similarity_score),
+    })
+  }
 
   const seenDocumentIds = new Set<string>()
   const retrievedDocuments: RetrievedDocument[] = []

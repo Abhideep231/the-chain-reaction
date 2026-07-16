@@ -44,6 +44,19 @@ logger = get_logger(__name__)
 # fixed context window, not a tunable search API (that's /documents/retrieve).
 CONTEXT_TOP_K = 5
 
+# Sprint 17 (source citations): a citation snippet is a short preview for
+# the UI, not the full retrieved chunk — this caps it well below a typical
+# chunk's length (chunk_size=1000 characters, see app.core.config).
+CITATION_SNIPPET_MAX_CHARS = 200
+
+
+def _build_snippet(chunk_text: str) -> str:
+    """Truncate a retrieved chunk down to a short citation preview."""
+    stripped = chunk_text.strip()
+    if len(stripped) <= CITATION_SNIPPET_MAX_CHARS:
+        return stripped
+    return stripped[:CITATION_SNIPPET_MAX_CHARS].rstrip() + "…"
+
 
 def ask(question: str, client: Anthropic | None = None) -> AskResponse:
     """Answer `question` using single-turn RAG: retrieve relevant chunks,
@@ -124,6 +137,7 @@ def ask(question: str, client: Anthropic | None = None) -> AskResponse:
             page_number=result.page_number,
             chunk_id=result.chunk_id,
             similarity_score=result.similarity_score,
+            snippet=_build_snippet(result.chunk_text),
         )
         for result in retrieval_response.results
     ]

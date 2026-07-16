@@ -37,7 +37,12 @@ export function friendlyErrorMessage(error: unknown): string {
       case "validation":
         return error.message || "The request was invalid."
       case "not_found":
-        return "The requested resource could not be found."
+        // The backend's 404 detail text is already a specific,
+        // user-safe message (e.g. "No relevant document chunks were
+        // found for this question." from an empty retrieval) — prefer
+        // it over a generic fallback so Ask AI can show a clear reason
+        // instead of a vague one.
+        return error.message || "The requested resource could not be found."
       case "server":
         return "The backend ran into a problem processing that request. Please try again."
       default:
