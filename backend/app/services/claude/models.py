@@ -9,6 +9,7 @@ class Citation(BaseModel):
     page_number: int
     chunk_id: str
     similarity_score: float
+    snippet: str
 
 
 class AskResponse(BaseModel):

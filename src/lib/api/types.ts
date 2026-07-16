@@ -177,6 +177,7 @@ export interface ClaudeCitation {
   page_number: number
   chunk_id: string
   similarity_score: number
+  snippet: string
 }
 
 export interface AskResponse {
