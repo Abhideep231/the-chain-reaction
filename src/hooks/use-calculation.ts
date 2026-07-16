@@ -46,8 +46,13 @@ export function useCalculation() {
 
     const finalTimeout = window.setTimeout(
       () => {
-        // No backend yet — Sprint 6 is frontend-only. This is the one
-        // call a future integration replaces with `POST /api/calculations`.
+        // Sprint 16 (frontend-backend integration) deliberately left this
+        // on the local engine: the real POST /calculations is still a
+        // non-functional placeholder (always returns
+        // {status: "not_implemented", result: null}, see
+        // backend/app/api/routes/calculations.py) with no engineering
+        // formulas behind it. Wiring this call to that endpoint would
+        // replace a working feature with one that always fails.
         const calculationResult = runMockCalculation(input)
         setResult(calculationResult)
         setSummary(

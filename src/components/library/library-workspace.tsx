@@ -46,13 +46,23 @@ export function LibraryWorkspace() {
           onViewModeChange={library.setViewMode}
         />
         <div className="flex-1 overflow-auto p-4">
-          <DocumentGrid
-            documents={library.filteredDocuments}
-            viewMode={library.viewMode}
-            selectedDocumentId={library.selectedDocumentId}
-            onSelectDocument={library.selectDocument}
-            onClearFilters={library.clearFilters}
-          />
+          {library.isLoading ? (
+            <p className="py-16 text-center text-sm text-muted-foreground">
+              Loading documents…
+            </p>
+          ) : library.error ? (
+            <p className="py-16 text-center text-sm text-status-critical">
+              {library.error}
+            </p>
+          ) : (
+            <DocumentGrid
+              documents={library.filteredDocuments}
+              viewMode={library.viewMode}
+              selectedDocumentId={library.selectedDocumentId}
+              onSelectDocument={library.selectDocument}
+              onClearFilters={library.clearFilters}
+            />
+          )}
         </div>
       </div>
     </div>

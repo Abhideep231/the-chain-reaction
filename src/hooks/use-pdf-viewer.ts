@@ -5,6 +5,13 @@ import * as React from "react"
 import { citations, documentMeta, pages } from "@/lib/pdf-mock"
 import type { FitMode } from "@/types/pdf"
 
+// Sprint 16 (frontend-backend integration) left this on the Sprint 3
+// mock: the backend saves an uploaded PDF's bytes to disk and returns
+// its parsed text (see POST /documents/upload), but there is no route
+// anywhere in Sprints 9-15 that serves a stored PDF's raw file or
+// per-page content back out, and no per-document ID this viewer could
+// even request. There's nothing real to fetch yet.
+
 const MIN_ZOOM = 50
 const MAX_ZOOM = 200
 const ZOOM_STEP = 10
