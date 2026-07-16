@@ -41,3 +41,21 @@ class DeleteDocumentResult(BaseModel):
 class ResetDatabaseResult(BaseModel):
     status: str
     collection_name: str
+
+
+class QueryMatch(BaseModel):
+    """One nearest-neighbor match from a similarity query, ordered by
+    the collection's distance metric (most similar first).
+    """
+
+    chunk_id: str
+    document_id: str
+    chunk_index: int
+    page_number: int
+    filename: str
+    chunk_text: str
+    embedding_model: str
+    vector_dimension: int
+    created_at: datetime
+    distance: float
+    similarity_score: float
