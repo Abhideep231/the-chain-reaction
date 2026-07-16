@@ -19,3 +19,7 @@ class ChatResponse(BaseModel):
     reply: str
     citations: list[ChatCitation]
     confidence: float | None = None
+
+
+class AskRequest(BaseModel):
+    question: str
