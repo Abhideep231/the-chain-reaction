@@ -2,9 +2,12 @@
 
 import * as React from "react"
 
-import { documents, getDocumentById } from "@/lib/library-mock"
+import { adaptDocumentSummary } from "@/lib/api/adapters"
+import { listDocuments } from "@/lib/api/documents"
+import { friendlyErrorMessage } from "@/lib/api/errors"
 import {
   ALL_FILTER_VALUE,
+  type LibraryDocument,
   type LibraryFilters,
   type LibrarySortOption,
   type LibraryViewMode,
@@ -18,12 +21,38 @@ const defaultFilters: LibraryFilters = {
 }
 
 export function useLibrary() {
+  const [documents, setDocuments] = React.useState<LibraryDocument[]>([])
+  const [isLoading, setIsLoading] = React.useState(true)
+  const [error, setError] = React.useState<string | null>(null)
   const [filters, setFilters] = React.useState<LibraryFilters>(defaultFilters)
   const [sort, setSort] = React.useState<LibrarySortOption>("recent")
   const [viewMode, setViewMode] = React.useState<LibraryViewMode>("grid")
   const [selectedDocumentId, setSelectedDocumentId] = React.useState<
     string | null
   >(null)
+
+  React.useEffect(() => {
+    let cancelled = false
+    setIsLoading(true)
+    setError(null)
+
+    listDocuments()
+      .then((response) => {
+        if (cancelled) return
+        setDocuments(response.documents.map(adaptDocumentSummary))
+      })
+      .catch((caught: unknown) => {
+        if (cancelled) return
+        setError(friendlyErrorMessage(caught))
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const setSearch = React.useCallback((search: string) => {
     setFilters((prev) => ({ ...prev, search }))
@@ -88,15 +117,20 @@ export function useLibrary() {
           )
       }
     })
-  }, [filters, sort])
+  }, [documents, filters, sort])
 
   const selectedDocument = React.useMemo(
     () =>
-      selectedDocumentId ? (getDocumentById(selectedDocumentId) ?? null) : null,
-    [selectedDocumentId]
+      selectedDocumentId
+        ? (documents.find((document) => document.id === selectedDocumentId) ??
+          null)
+        : null,
+    [documents, selectedDocumentId]
   )
 
   return {
+    isLoading,
+    error,
     filters,
     sort,
     viewMode,

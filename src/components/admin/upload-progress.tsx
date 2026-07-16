@@ -1,4 +1,9 @@
-import { CheckCircle2Icon, CircleIcon, LoaderCircleIcon } from "lucide-react"
+import {
+  AlertTriangleIcon,
+  CheckCircle2Icon,
+  CircleIcon,
+  LoaderCircleIcon,
+} from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { UPLOAD_STAGES } from "@/types/admin"
@@ -20,11 +25,19 @@ export function UploadProgress({ upload }: { upload: UploadProgressData }) {
         <div
           className={cn(
             "h-full rounded-full bg-primary transition-[width] duration-300",
-            isComplete && "bg-status-good"
+            isComplete && !upload.error && "bg-status-good",
+            upload.error && "bg-status-critical"
           )}
           style={{ width: `${upload.percent}%` }}
         />
       </div>
+
+      {upload.error && (
+        <p className="flex items-center gap-1.5 text-sm text-status-critical">
+          <AlertTriangleIcon className="size-4 shrink-0" />
+          {upload.error}
+        </p>
+      )}
 
       <ol className="flex flex-col gap-2.5">
         {UPLOAD_STAGES.map((stage, index) => {

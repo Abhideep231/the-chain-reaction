@@ -13,14 +13,27 @@ export function UploadCard({
   onUpload,
 }: {
   upload: UploadProgressData | null
-  onUpload: (fileName?: string) => void
+  onUpload: (file: File) => void
 }) {
   const [isDragging, setIsDragging] = React.useState(false)
-  const disabled = upload !== null && upload.percent < 100
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
+  const disabled = upload !== null && upload.percent < 100 && !upload.error
 
   return (
     <div className="flex flex-col gap-4 rounded-lg border bg-card p-4">
       <h3 className="text-sm font-semibold">Upload Document</h3>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          event.target.value = ""
+          if (file && !disabled) onUpload(file)
+        }}
+      />
 
       <div
         onDragOver={(event) => {
@@ -31,8 +44,8 @@ export function UploadCard({
         onDrop={(event) => {
           event.preventDefault()
           setIsDragging(false)
-          const fileName = event.dataTransfer.files[0]?.name
-          if (!disabled) onUpload(fileName)
+          const file = event.dataTransfer.files[0]
+          if (file && !disabled) onUpload(file)
         }}
         className={cn(
           "flex flex-col items-center gap-3 rounded-lg border-2 border-dashed p-8 text-center transition-colors",
@@ -48,14 +61,14 @@ export function UploadCard({
             or use the button below to select a file
           </p>
         </div>
-        <Button onClick={() => onUpload()} disabled={disabled}>
+        <Button onClick={() => fileInputRef.current?.click()} disabled={disabled}>
           Upload PDF
         </Button>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>Supported formats: PDF</span>
-        <span>Maximum size: 50 MB</span>
+        <span>Maximum size: 25 MB</span>
       </div>
 
       {upload && <UploadProgress upload={upload} />}

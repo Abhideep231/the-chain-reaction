@@ -2,10 +2,11 @@
 
 import * as React from "react"
 
-import { getMockAnswer, suggestedPrompts } from "@/lib/ask-ai-mock"
+import { adaptAskResponse } from "@/lib/api/adapters"
+import { askQuestion } from "@/lib/api/chat"
+import { friendlyErrorMessage } from "@/lib/api/errors"
+import { suggestedPrompts } from "@/lib/ask-ai-mock"
 import type { ChatMessage } from "@/types/chat"
-
-const MOCK_RESPONSE_DELAY_MS = 1100
 
 export function useAskAi() {
   const [messages, setMessages] = React.useState<ChatMessage[]>([])
@@ -26,19 +27,26 @@ export function useAskAi() {
     setMessages((prev) => [...prev, userMessage])
     setStatus("loading")
 
-    // No backend yet — Sprint 2 is frontend-only, so the "response" is a
-    // canned lookup on a timer to demonstrate the loading state honestly.
-    window.setTimeout(() => {
-      const answer = getMockAnswer(trimmed)
-      const assistantMessage: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: answer.summary,
-        answer,
-      }
-      setMessages((prev) => [...prev, assistantMessage])
-      setStatus("idle")
-    }, MOCK_RESPONSE_DELAY_MS)
+    askQuestion(trimmed)
+      .then((response) => {
+        const answer = adaptAskResponse(response)
+        const assistantMessage: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: answer.summary,
+          answer,
+        }
+        setMessages((prev) => [...prev, assistantMessage])
+      })
+      .catch((error: unknown) => {
+        const assistantMessage: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: friendlyErrorMessage(error),
+        }
+        setMessages((prev) => [...prev, assistantMessage])
+      })
+      .finally(() => setStatus("idle"))
   }, [status])
 
   const latestAnswer = React.useMemo(() => {

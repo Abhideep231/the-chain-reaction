@@ -52,6 +52,9 @@ export interface UploadProgress {
   fileName: string
   stageIndex: number
   percent: number
+  /** Set when a pipeline stage fails against the real backend — the
+   * friendly message to show instead of continuing to the next stage. */
+  error?: string
 }
 
 export interface SystemInformation {
