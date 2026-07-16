@@ -58,7 +58,10 @@ from app.services.vectorstore.exceptions import VectorStoreError
 from app.services.vectorstore.models import StoreEmbeddingsResult
 from app.services.vectorstore.vector_store import get_vector_store_service
 
-_EMBEDDING_ERROR_STATUS: dict[type[EmbeddingError], int] = {
+# Not underscore-prefixed: api/routes/chat.py's /chat/ask also imports these,
+# since asking Claude reuses this same retrieval/embedding pipeline and
+# should report the exact same status codes for the exact same failures.
+EMBEDDING_ERROR_STATUS: dict[type[EmbeddingError], int] = {
     EmptyChunkListError: status.HTTP_422_UNPROCESSABLE_ENTITY,
     InvalidChunkDataError: status.HTTP_422_UNPROCESSABLE_ENTITY,
     MissingApiKeyError: status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -69,7 +72,7 @@ _EMBEDDING_ERROR_STATUS: dict[type[EmbeddingError], int] = {
     EmbeddingApiError: status.HTTP_502_BAD_GATEWAY,
 }
 
-_RETRIEVAL_ERROR_STATUS: dict[type[RetrievalError], int] = {
+RETRIEVAL_ERROR_STATUS: dict[type[RetrievalError], int] = {
     EmptyQueryError: status.HTTP_422_UNPROCESSABLE_ENTITY,
     InvalidTopKError: status.HTTP_422_UNPROCESSABLE_ENTITY,
     VectorStoreUnavailableError: status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -178,7 +181,7 @@ def embed_chunks(request: ChunkingResult) -> EmbeddingResult:
     try:
         return generate_embeddings(request)
     except EmbeddingError as exc:
-        status_code = _EMBEDDING_ERROR_STATUS.get(
+        status_code = EMBEDDING_ERROR_STATUS.get(
             type(exc), status.HTTP_500_INTERNAL_SERVER_ERROR
         )
         raise HTTPException(status_code, str(exc)) from exc
@@ -197,12 +200,12 @@ def retrieve_chunks(request: RetrievalRequest) -> RetrievalResponse:
     try:
         return retrieve(request.query, request.top_k, request.similarity_threshold)
     except RetrievalError as exc:
-        status_code = _RETRIEVAL_ERROR_STATUS.get(
+        status_code = RETRIEVAL_ERROR_STATUS.get(
             type(exc), status.HTTP_500_INTERNAL_SERVER_ERROR
         )
         raise HTTPException(status_code, str(exc)) from exc
     except EmbeddingError as exc:
-        status_code = _EMBEDDING_ERROR_STATUS.get(
+        status_code = EMBEDDING_ERROR_STATUS.get(
             type(exc), status.HTTP_500_INTERNAL_SERVER_ERROR
         )
         raise HTTPException(status_code, str(exc)) from exc

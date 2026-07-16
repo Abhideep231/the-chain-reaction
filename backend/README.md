@@ -5,10 +5,11 @@ intelligence platform. Sprint 9 built the modular, production-ready
 application skeleton; Sprint 10 added PDF upload and structured text/
 metadata extraction; Sprint 11 added recursive document chunking;
 Sprint 12 added OpenAI embedding generation; Sprint 13 added local
-persistent vector storage (ChromaDB); Sprint 14 adds semantic
-similarity search over that store. Claude API, chat generation,
-calculation logic, and authentication are still not implemented —
-those are built in future sprints.
+persistent vector storage (ChromaDB); Sprint 14 added semantic
+similarity search over that store; Sprint 15 adds single-turn RAG
+answer generation via Claude on top of that retrieval. Chat history/
+memory, calculation logic, and authentication are still not
+implemented — those are built in future sprints.
 
 ## Requirements
 
@@ -53,9 +54,12 @@ hardcoded:
 | `ENVIRONMENT`       | `development` / `staging` / `production`              |
 | `ALLOWED_ORIGINS`   | JSON array of origins allowed by CORS                 |
 | `LOG_LEVEL`         | Root logger level (`DEBUG`, `INFO`, ...)              |
-| `CLAUDE_API_KEY`    | Placeholder — wired up when the Claude service ships  |
 | `OPENAI_API_KEY`    | Required for `/documents/embed`; no default, must be set to call OpenAI |
 | `EMBEDDING_MODEL`   | OpenAI embedding model name (default `text-embedding-3-large`) |
+| `ANTHROPIC_API_KEY` | Required for `/chat/ask`; no default, must be set to call Claude |
+| `CLAUDE_MODEL`      | Claude model name (default `claude-sonnet-4`)         |
+| `CLAUDE_MAX_TOKENS` | Max tokens in Claude's response (default `1000`)      |
+| `CLAUDE_TEMPERATURE`| Claude sampling temperature (default `0`, deterministic) |
 | `VECTOR_DB_PATH`    | Directory the ChromaDB PersistentClient stores its database in (default `./data/chromadb`) |
 | `UPLOAD_DIR`        | Directory uploaded PDFs are persisted to (created automatically) |
 | `MAX_UPLOAD_SIZE_MB`| Maximum accepted upload size in megabytes (default `25`) |
@@ -77,8 +81,11 @@ backend/
 │   │   │                 # implemented
 │   │   ├── vectorstore/  # vector_store.py (ChromaDB) + models.py + exceptions.py —
 │   │   │                 # implemented
-│   │   └── retrieval/    # retrieval_service.py + models.py + exceptions.py —
-│   │                     # implemented. claude, calculations remain empty, for future sprints
+│   │   ├── retrieval/    # retrieval_service.py + models.py + exceptions.py —
+│   │   │                 # implemented
+│   │   └── claude/       # claude_service.py + prompt_builder.py + models.py +
+│   │                     # exceptions.py — implemented. calculations remains empty,
+│   │                     # for a future sprint
 │   ├── schemas/          # Pydantic request/response models, one module per resource
 │   │                     # (pdf.py holds the parser's structured output schemas; the
 │   │                     # chunker's, embedding service's, vector store's, and retrieval
@@ -109,7 +116,8 @@ backend/
 | DELETE | `/vectorstore/document/{document_id}` | **Real** — deletes all vectors for one document |
 | DELETE | `/vectorstore/reset` | **Real** — resets the entire vector database              |
 | POST   | `/documents/retrieve`| **Real** — semantic similarity search over stored vectors (see below) |
-| POST   | `/chat`              | Placeholder — returns a fixed reply                           |
+| POST   | `/chat`              | Placeholder — returns a fixed reply (multi-turn chat, a future sprint) |
+| POST   | `/chat/ask`          | **Real** — single-turn RAG: retrieval + Claude (see below)    |
 | POST   | `/calculations`      | Placeholder — returns `status: "not_implemented"`             |
 | GET    | `/admin/status`      | Returns app status plus process uptime                        |
 
@@ -377,6 +385,114 @@ Error handling:
 Every stage (retrieval started, embedding generated, vector search
 started, matches found, retrieval completed with duration) is logged
 via the centralized logger.
+
+## Claude integration (`POST /chat/ask`)
+
+Answers a natural-language question with single-turn RAG: retrieve
+relevant chunks, build a context-grounded prompt, and ask Claude to
+answer strictly from that context (`app/services/claude/claude_service.py`
+— the single source of Claude answer generation). No streaming, no
+conversation memory/history, no prompt caching, no agent framework —
+one question in, one grounded answer out.
+
+### RAG flow
+
+```
+User Question
+     |
+Generate Query Embedding      (reused: embedding service, Sprint 12)
+     |
+Semantic Retrieval            (reused: retrieval service, Sprint 14)
+     |
+Top Relevant Chunks
+     |
+Build Claude Prompt           (app/services/claude/prompt_builder.py)
+     |
+Claude API                    (Anthropic SDK, single call, no streaming)
+     |
+Final Answer
+     |
+Return Sources                (citations, one per retrieved chunk)
+```
+
+Every step through "Top Relevant Chunks" is exactly `retrieve()` from
+`app.services.retrieval.retrieval_service` (Sprint 14), called with a
+fixed context size (`CONTEXT_TOP_K = 5`) — this sprint adds nothing new
+to retrieval itself, only what happens after it.
+
+### Prompt design
+
+The **system prompt** instructs Claude to:
+- answer strictly from the supplied context, never from outside/prior knowledge;
+- never hallucinate or invent engineering values, specs, or measurements not explicitly stated;
+- respond with exactly `"The uploaded documents do not contain enough information to answer this question."` when the context is insufficient;
+- stay technical and precise.
+
+The **context block** (`build_context`) formats every retrieved chunk identically:
+```
+Document: <filename>
+Page: <page_number>
+Chunk: <chunk_id>
+
+Content:
+<chunk_text>
+```
+with `---` separating chunks, followed by the question. This is pure
+string formatting — no markdown rendering, no HTML generation.
+
+### Claude request
+
+Uses the official `anthropic` Python SDK. Model, max tokens, and
+temperature are configurable (`CLAUDE_MODEL` / `CLAUDE_MAX_TOKENS` /
+`CLAUDE_TEMPERATURE`, defaulting to `claude-sonnet-4` / `1000` / `0` —
+temperature `0` for deterministic, non-creative answers, appropriate
+for grounded technical Q&A). The client is injectable
+(`ask(question, client=...)`), matching the same testability pattern
+used for the OpenAI client in the embedding service.
+
+### Output
+
+```json
+// POST /chat/ask
+{ "question": "What is the required safety factor for a steel beam?" }
+
+// 200 OK
+{ "answer": "...", "citations": [ { "document_id", "filename",
+  "page_number", "chunk_id", "similarity_score" } ], "confidence": 0.87,
+  "response_time_ms": 842.3, "model": "claude-sonnet-4" }
+```
+`citations` has one entry per chunk used as context (from the same
+retrieval results, not re-derived). `confidence` is **not** Claude
+self-reporting a number — it's the best-matching retrieved chunk's own
+`similarity_score`, a real, computed retrieval signal. Asking an LLM to
+invent its own confidence score would itself be exactly the kind of
+unsupported value this service is built to avoid.
+
+### Error handling
+
+An empty retrieval result here is treated differently than at
+`/documents/retrieve`: with zero chunks, there's nothing to build a
+context from, so `/chat/ask` fails fast (404) rather than spending a
+Claude call on an empty prompt. A *weak* match (chunks retrieved, but
+not actually relevant) is not an error — Claude itself judges
+sufficiency per the system prompt and returns the standard
+"not enough information" sentence as its `answer`.
+
+| Failure                                       | Status                     |
+| ------------------------------------------------ | ---------------------------- |
+| No relevant chunks found (empty retrieval)        | 404 Not Found                |
+| `ANTHROPIC_API_KEY` not configured                | 500 Internal Server Error    |
+| Claude rejects the API key                        | 500 Internal Server Error    |
+| Claude rate limit exceeded                        | 429 Too Many Requests        |
+| Request to Claude timed out                       | 504 Gateway Timeout          |
+| Built prompt exceeds Claude's size limit          | 413 Request Entity Too Large |
+| Any other Claude API error                        | 502 Bad Gateway              |
+| (query embedding / retrieval failures)            | same statuses as `/documents/embed` and `/documents/retrieve` — propagated unwrapped, not re-derived |
+
+Every stage (question received, retrieval started/completed, Claude
+request started, Claude response received, answer generated with
+execution time) is logged via the centralized logger. API keys are
+never logged.
 
 ## Verification
 

@@ -7,3 +7,4 @@ pymupdf==1.28.0
 python-multipart==0.0.32
 openai==2.45.0
 chromadb==1.5.9
+anthropic==0.116.0
