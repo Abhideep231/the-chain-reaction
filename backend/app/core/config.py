@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     embedding_model: str = "text-embedding-3-large"
     anthropic_api_key: str | None = None
-    claude_model: str = "claude-sonnet-4"
+    claude_model: str = "claude-sonnet-5"
     claude_max_tokens: int = 1000
     claude_temperature: float = 0.0
 
