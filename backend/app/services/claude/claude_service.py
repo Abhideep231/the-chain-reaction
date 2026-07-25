@@ -69,6 +69,12 @@ CONTEXT_TOP_K = 5
 # chunk's length (chunk_size=1000 characters, see app.core.config).
 CITATION_SNIPPET_MAX_CHARS = 200
 
+# Live-tested against the real API: these models reject any explicit
+# `temperature` value with a 400 ("`temperature` is deprecated for this
+# model") — the parameter must be omitted entirely, not just set to a
+# particular value. Older Claude models still accept and use it normally.
+_MODELS_WITHOUT_TEMPERATURE = {"claude-sonnet-5", "claude-opus-5", "claude-fable-5"}
+
 
 def _build_snippet(chunk_text: str) -> str:
     """Truncate a retrieved chunk down to a short citation preview."""
@@ -105,6 +111,13 @@ def _create_message(
     exceptions shared by every Claude entry point in this service.
     """
     try:
+        if model in _MODELS_WITHOUT_TEMPERATURE:
+            return client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=messages,
+            )
         return client.messages.create(
             model=model,
             max_tokens=max_tokens,
