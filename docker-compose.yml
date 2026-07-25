@@ -5,13 +5,25 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - ./backend/.env
+      # Optional: local dev (this file exists) fills in values from disk;
+      # Codespaces (this file never exists there) relies entirely on the
+      # `environment:` block below instead, which is never blank so
+      # Compose never fails to start over a missing file.
+      - path: ./backend/.env
+        required: false
     environment:
+      # Bare names (no `=value`) pass the variable through only if it's
+      # actually set in the invoking shell (GitHub Codespaces secrets are
+      # real shell env vars there) — unlike `${VAR:-}` interpolation, this
+      # does NOT declare the key at all when the shell doesn't have it, so
+      # it can't blank out a real value already loaded from env_file below.
+      # Where both exist, environment: still correctly wins over env_file.
+      - OPENAI_API_KEY
+      - ANTHROPIC_API_KEY
       # Pin storage paths to the mounted volumes below, regardless of the
-      # (relative, local-dev-oriented) paths in backend/.env — env_file
-      # values are overridden by environment values in Compose's merge order.
-      VECTOR_DB_PATH: /data/chromadb
-      UPLOAD_DIR: /data/uploads
+      # (relative, local-dev-oriented) paths in backend/.env.
+      - VECTOR_DB_PATH=/data/chromadb
+      - UPLOAD_DIR=/data/uploads
     volumes:
       - chroma-data:/data/chromadb
       - upload-data:/data/uploads
@@ -20,11 +32,20 @@ services:
     build:
       context: .
       args:
-        # The browser calls this URL directly, so it must be reachable from
-        # the host — the backend's published port, not the compose service name.
-        NEXT_PUBLIC_API_URL: http://localhost:8000
+        # A relative path, not an absolute URL: the browser resolves it
+        # against the page's own origin, so the request never leaves
+        # port 3000 — this is what avoids GitHub Codespaces' forwarded-port
+        # authentication proxy rejecting cross-port JS requests. Next.js
+        # rewrites this same path server-side to the backend container
+        # (see next.config.ts's BACKEND_INTERNAL_URL rewrite).
+        NEXT_PUBLIC_API_URL: /api/backend
     ports:
       - "3000:3000"
+    environment:
+      # Server-side only — Next.js's rewrite target, resolved using
+      # Compose's internal DNS (the service name "backend", not
+      # "localhost", which inside this container means itself).
+      BACKEND_INTERNAL_URL: http://backend:8000
     depends_on:
       - backend
 

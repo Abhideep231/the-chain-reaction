@@ -190,7 +190,33 @@ This builds and starts both services with one command:
   named volumes (`chroma-data`, `upload-data`) so they survive container
   restarts.
 - `frontend` — Next.js production build (`output: "standalone"`), port
-  `3000`.
+  `3000`. Calls the backend through a same-origin `/api/backend/*` path
+  (see `next.config.ts`'s rewrite), not directly — this matters in
+  environments like GitHub Codespaces where a forwarded port's own
+  authentication proxy rejects cross-port JS requests from the browser.
+
+### GitHub Codespaces
+
+Opening (or reopening) a Codespace on this repo starts the stack
+automatically via `.devcontainer/devcontainer.json` — `docker compose up -d
+--build` on first creation, `docker compose up -d` on every reopen. No
+manual steps needed beyond configuring secrets once.
+
+**Required Codespaces secrets** (repo Settings → Secrets and variables →
+Codespaces): `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`. These are forwarded into
+the backend container automatically — `backend/.env` is optional in this
+environment and is never present in a fresh Codespace, which is expected.
+
+**Use port `3000`** (the forwarded-port "Open in Browser" globe icon) as
+the application URL. Port `8000` is the backend API and Swagger docs
+(`/docs`) only — it has no homepage, so a blank page at its bare URL is
+normal.
+
+**Upload vs. indexing**: uploading a PDF through Swagger's
+`/documents/upload` only parses and saves it — it does not chunk, embed, or
+store it in ChromaDB. Use the frontend's Admin page to upload, which runs
+the full upload → chunk → embed → store pipeline automatically. Ask AI has
+nothing to answer from until all four steps complete.
 
 ## CI
 
