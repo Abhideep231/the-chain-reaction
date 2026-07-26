@@ -39,13 +39,13 @@ services:
         # rewrites this same path server-side to the backend container
         # (see next.config.ts's BACKEND_INTERNAL_URL rewrite).
         NEXT_PUBLIC_API_URL: /api/backend
+        # Must be a build arg, not just a runtime `environment:` entry:
+        # `next build` resolves rewrites() into a static routes-manifest,
+        # so the value has to be present during the build itself, not just
+        # in the running container afterward.
+        BACKEND_INTERNAL_URL: http://backend:8000
     ports:
       - "3000:3000"
-    environment:
-      # Server-side only — Next.js's rewrite target, resolved using
-      # Compose's internal DNS (the service name "backend", not
-      # "localhost", which inside this container means itself).
-      BACKEND_INTERNAL_URL: http://backend:8000
     depends_on:
       - backend
 
