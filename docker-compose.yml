@@ -35,17 +35,18 @@ services:
         # A relative path, not an absolute URL: the browser resolves it
         # against the page's own origin, so the request never leaves
         # port 3000 — this is what avoids GitHub Codespaces' forwarded-port
-        # authentication proxy rejecting cross-port JS requests. Next.js
-        # rewrites this same path server-side to the backend container
-        # (see next.config.ts's BACKEND_INTERNAL_URL rewrite).
+        # authentication proxy rejecting cross-port JS requests. The
+        # server-side Route Handler at src/app/api/backend/[...path] then
+        # streams the request through to the backend container.
         NEXT_PUBLIC_API_URL: /api/backend
-        # Must be a build arg, not just a runtime `environment:` entry:
-        # `next build` resolves rewrites() into a static routes-manifest,
-        # so the value has to be present during the build itself, not just
-        # in the running container afterward.
-        BACKEND_INTERNAL_URL: http://backend:8000
     ports:
       - "3000:3000"
+    environment:
+      # Read at real request time by the Route Handler above (unlike the
+      # rewrite this replaced, a Route Handler is normal server code, not
+      # a build-time-resolved manifest), so this only needs to be a
+      # runtime value, not a build arg.
+      BACKEND_INTERNAL_URL: http://backend:8000
     depends_on:
       - backend
 

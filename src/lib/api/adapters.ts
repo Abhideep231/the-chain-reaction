@@ -6,6 +6,7 @@ import type {
   DocumentSummary,
   VectorStoreStatus,
 } from "@/lib/api/types"
+import type { AdminDocument, KnowledgeStatistics } from "@/types/admin"
 import type { Citation, EngineeringAnswer, RetrievedDocument } from "@/types/chat"
 import type { CalculationInput, CalculationResult } from "@/types/calculation"
 import type { ActivityItem, Metric, StatusBreakdownItem } from "@/types/dashboard"
@@ -252,4 +253,47 @@ export function adaptRecentlyIndexed(
         timestamp: formatRelativeTime(document.uploaded_at),
       }
     })
+}
+
+/** Maps `GET /documents`'s real document list onto the Admin page's
+ * Document Management table — the same real data Knowledge Library
+ * shows, since both read from the same backend list. `documentType` and
+ * `version` have no backend equivalent (same placeholder convention as
+ * `adaptDocumentSummary`); every returned document is, by definition,
+ * fully indexed, so `status` is always "indexed", never fabricated. */
+export function adaptAdminDocuments(
+  documentsResponse: DocumentListResponse | null
+): AdminDocument[] {
+  if (!documentsResponse) return []
+  return documentsResponse.documents.map((document) => ({
+    id: document.id,
+    name: document.filename,
+    documentType: "Manual",
+    version: "—",
+    status: "indexed",
+    chunks: document.chunk_count,
+    lastUpdated: formatUploadedAt(document.uploaded_at),
+  }))
+}
+
+/** Real counts derived from the same `GET /documents` list — no
+ * "pending"/"failed" document ever persists in the backend (nothing
+ * mid-pipeline is stored), so those two are genuinely always 0, not
+ * invented. `averageChunkSize`/`knowledgeCoverage`/`lastSynchronization`
+ * have no backend equivalent at all and are left to the caller's mock
+ * fallback, unlike the counts above. */
+export function adaptAdminDocumentCounts(
+  documentsResponse: DocumentListResponse | null
+): Pick<
+  KnowledgeStatistics,
+  "totalDocuments" | "indexedDocuments" | "totalChunks" | "pendingDocuments" | "failedDocuments"
+> {
+  const documents = documentsResponse?.documents ?? []
+  return {
+    totalDocuments: documentsResponse?.total ?? 0,
+    indexedDocuments: documents.length,
+    totalChunks: documents.reduce((sum, document) => sum + document.chunk_count, 0),
+    pendingDocuments: 0,
+    failedDocuments: 0,
+  }
 }

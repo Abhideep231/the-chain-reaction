@@ -2,17 +2,18 @@
 
 import * as React from "react"
 
+import { adaptAdminDocumentCounts, adaptAdminDocuments } from "@/lib/api/adapters"
 import { getAdminStatus, getVectorStoreStatus } from "@/lib/api/admin"
 import {
   chunkDocument,
   embedChunks,
+  listDocuments,
   storeEmbeddings,
   uploadPdf,
 } from "@/lib/api/documents"
 import { friendlyErrorMessage } from "@/lib/api/errors"
 import {
   initialActivity,
-  initialDocuments,
   initialHealth,
   initialStatistics,
   systemInformation,
@@ -33,9 +34,10 @@ function percentForStage(stageIndex: number): number {
 }
 
 export function useAdmin() {
-  const [documents, setDocuments] = React.useState<AdminDocument[]>(
-    initialDocuments
-  )
+  // Document Management starts empty and is filled from the same real
+  // GET /documents Knowledge Library uses (Sprint 20) — never the old
+  // Sprint 7 mock rows, which showed documents nobody had ever uploaded.
+  const [documents, setDocuments] = React.useState<AdminDocument[]>([])
   const [statistics, setStatistics] = React.useState(initialStatistics)
   const [activity, setActivity] = React.useState(initialActivity)
   const [upload, setUpload] = React.useState<UploadProgress | null>(null)
@@ -87,6 +89,25 @@ export function useAdmin() {
           )
         )
         setKnowledgeBaseStatus("Critical")
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  React.useEffect(() => {
+    let cancelled = false
+
+    listDocuments()
+      .then((response) => {
+        if (cancelled) return
+        setDocuments(adaptAdminDocuments(response))
+        setStatistics((prev) => ({ ...prev, ...adaptAdminDocumentCounts(response) }))
+      })
+      .catch(() => {
+        // Left empty — the table's own empty state renders honestly
+        // rather than showing stale or invented documents.
       })
 
     return () => {

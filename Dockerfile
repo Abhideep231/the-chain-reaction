@@ -13,13 +13,6 @@ COPY . .
 # for a non-default backend URL.
 ARG NEXT_PUBLIC_API_URL=http://localhost:8000
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-# next.config.ts's rewrites() is resolved by `next build` into a static
-# routes-manifest — it is NOT re-read from the container's runtime
-# environment at server start, so this must be a build arg too (the same
-# reason NEXT_PUBLIC_API_URL is one above), not just a docker-compose.yml
-# `environment:` entry on the running container.
-ARG BACKEND_INTERNAL_URL=http://backend:8000
-ENV BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL}
 RUN npm run build
 
 FROM node:20-slim AS runner
