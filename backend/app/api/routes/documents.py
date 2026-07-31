@@ -23,7 +23,7 @@ retrieval service.
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, UploadFile, status
 
 from app.core.config import get_settings
 from app.core.constants import ALLOWED_PDF_CONTENT_TYPES, PDF_EXTENSION, PDF_MAGIC_BYTES
@@ -127,9 +127,18 @@ def upload_document(request: DocumentUploadRequest) -> DocumentUploadResponse:
     response_model=DocumentUploadAccepted,
     status_code=status.HTTP_202_ACCEPTED,
 )
-async def upload_pdf(file: UploadFile, background_tasks: BackgroundTasks) -> DocumentUploadAccepted:
+async def upload_pdf(
+    request: Request, file: UploadFile, background_tasks: BackgroundTasks
+) -> DocumentUploadAccepted:
     settings = get_settings()
     filename = file.filename or ""
+
+    # TEMPORARY DEBUG — remove once the 413 investigation is resolved.
+    print(
+        "UPLOAD ENDPOINT HIT",
+        "content_length=", request.headers.get("content-length"),
+        "filename=", filename,
+    )
 
     logger.info("upload started: filename=%s content_type=%s", filename, file.content_type)
 
