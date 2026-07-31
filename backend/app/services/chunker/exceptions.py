@@ -12,8 +12,4 @@ class ChunkingError(Exception):
 
 
 class EmptyDocumentError(ChunkingError):
-    """The document has zero pages."""
-
-
-class EmptyPageError(ChunkingError):
-    """A page has no extractable text."""
+    """The document has zero pages, or no page has any extractable text."""
