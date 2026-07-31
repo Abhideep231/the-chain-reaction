@@ -4,13 +4,7 @@ import * as React from "react"
 
 import { adaptAdminDocumentCounts, adaptAdminDocuments } from "@/lib/api/adapters"
 import { getAdminStatus, getVectorStoreStatus } from "@/lib/api/admin"
-import {
-  chunkDocument,
-  embedChunks,
-  listDocuments,
-  storeEmbeddings,
-  uploadPdf,
-} from "@/lib/api/documents"
+import { getDocumentStatus, listDocuments, uploadPdf } from "@/lib/api/documents"
 import { friendlyErrorMessage } from "@/lib/api/errors"
 import {
   initialActivity,
@@ -18,6 +12,7 @@ import {
   initialStatistics,
   systemInformation,
 } from "@/lib/admin-mock"
+import type { IndexingJob, IndexingStage } from "@/lib/api/types"
 import type {
   AdminDocument,
   AdminSummary,
@@ -31,6 +26,25 @@ const LAST_STAGE_INDEX = UPLOAD_STAGES.length - 1
 
 function percentForStage(stageIndex: number): number {
   return Math.round((stageIndex / LAST_STAGE_INDEX) * 100)
+}
+
+// UPLOAD_STAGES is ["Uploading", "Parsing", "Chunking", "Generating
+// Embeddings", "Updating Vector Database", "Completed"] — index 0 is a
+// client-only phase (the multipart request itself, before a backend job
+// even exists); the rest map directly onto the real IndexingStage the
+// backend reports at GET /documents/{id}/status.
+const STAGE_INDEX: Record<IndexingStage, number> = {
+  parsing: 1,
+  chunking: 2,
+  embedding: 3,
+  storing: 4,
+  completed: 5,
+}
+
+const POLL_INTERVAL_MS = 1200
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export function useAdmin() {
@@ -138,8 +152,7 @@ export function useAdmin() {
       totalDocuments: prev.totalDocuments + 1,
     }))
 
-    function fail(error: unknown) {
-      const message = friendlyErrorMessage(error)
+    function fail(message: string) {
       setUpload((prev) => (prev ? { ...prev, error: message } : prev))
       setDocuments((prev) =>
         prev.map((doc) =>
@@ -158,32 +171,39 @@ export function useAdmin() {
 
     try {
       const uploadResult = await uploadPdf(file)
-      setUpload({ fileName, stageIndex: 1, percent: percentForStage(1) })
 
-      const chunkResult = await chunkDocument({
-        document_id: uploadResult.id,
-        parse_result: uploadResult.parse_result,
-      })
-      setUpload({ fileName, stageIndex: 2, percent: percentForStage(2) })
+      // The backend owns the entire parse -> chunk -> embed -> store
+      // pipeline as one background job (see app/services/indexing) —
+      // poll its real, current state rather than driving each stage
+      // from here. This also means no chunk text or embedding vector
+      // is ever round-tripped through the browser.
+      let job: IndexingJob = await getDocumentStatus(uploadResult.id)
+      while (job.status === "processing") {
+        const stageIndex = STAGE_INDEX[job.stage]
+        setUpload({ fileName, stageIndex, percent: percentForStage(stageIndex) })
+        await sleep(POLL_INTERVAL_MS)
+        job = await getDocumentStatus(uploadResult.id)
+      }
 
-      const embeddingResult = await embedChunks(chunkResult)
-      setUpload({ fileName, stageIndex: 3, percent: percentForStage(3) })
+      const finalStageIndex = STAGE_INDEX[job.stage]
+      setUpload({ fileName, stageIndex: finalStageIndex, percent: percentForStage(finalStageIndex) })
 
-      await storeEmbeddings(embeddingResult)
-      setUpload({ fileName, stageIndex: 4, percent: percentForStage(4) })
+      if (job.status === "failed") {
+        fail(job.error ?? "Indexing failed.")
+        return
+      }
 
-      setUpload({ fileName, stageIndex: 5, percent: percentForStage(5) })
       setDocuments((prev) =>
         prev.map((doc) =>
           doc.id === localDocId
-            ? { ...doc, status: "indexed", chunks: chunkResult.total_chunks }
+            ? { ...doc, status: "indexed", chunks: job.chunk_count }
             : doc
         )
       )
       setStatistics((prev) => ({
         ...prev,
         indexedDocuments: prev.indexedDocuments + 1,
-        totalChunks: prev.totalChunks + chunkResult.total_chunks,
+        totalChunks: prev.totalChunks + job.chunk_count,
       }))
       setActivity((prev) => [
         {
@@ -194,7 +214,7 @@ export function useAdmin() {
         ...prev,
       ])
     } catch (error) {
-      fail(error)
+      fail(friendlyErrorMessage(error))
     }
   }, [])
 
