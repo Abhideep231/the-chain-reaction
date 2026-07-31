@@ -22,32 +22,6 @@ export interface AdminStatusResponse {
   uptime_seconds: number
 }
 
-// ---- app/schemas/pdf.py ----
-
-export interface PdfMetadata {
-  filename: string
-  title: string | null
-  author: string | null
-  creator: string | null
-  producer: string | null
-  subject: string | null
-  creation_date: string | null
-  modification_date: string | null
-  total_pages: number
-}
-
-export interface PdfPageContent {
-  page_number: number
-  extracted_text: string
-  character_count: number
-  word_count: number
-}
-
-export interface PdfParseResult {
-  metadata: PdfMetadata
-  pages: PdfPageContent[]
-}
-
 // ---- app/schemas/documents.py ----
 
 export interface DocumentSummary {
@@ -65,16 +39,14 @@ export interface DocumentListResponse {
   total: number
 }
 
-export interface DocumentUploadResult {
+/** POST /documents/upload's immediate response — parsing, chunking,
+ * embedding, and storing all happen afterward in a background job on
+ * the backend (see app/services/indexing). Poll
+ * GET /documents/{id}/status (`IndexingJob` below) for progress. */
+export interface DocumentUploadAccepted {
   id: string
   filename: string
-  status: string
-  parse_result: PdfParseResult
-}
-
-export interface ChunkRequest {
-  document_id: string
-  parse_result: PdfParseResult
+  status: "processing"
 }
 
 export interface RetrievalRequest {
@@ -83,61 +55,22 @@ export interface RetrievalRequest {
   similarity_threshold?: number
 }
 
-// ---- app/services/chunker/models.py ----
+// ---- app/services/indexing/models.py ----
 
-export interface ChunkMetadata {
-  source_filename: string
-  page_number: number
-  total_pages: number
-  created_at: string
-}
+export type IndexingStage = "parsing" | "chunking" | "embedding" | "storing" | "completed"
+export type IndexingStatus = "processing" | "indexed" | "failed"
 
-export interface Chunk {
-  chunk_id: string
-  document_id: string
-  chunk_index: number
-  page_number: number
-  text: string
-  character_count: number
-  estimated_token_count: number
-  metadata: ChunkMetadata
-}
-
-export interface ChunkingResult {
-  total_chunks: number
-  chunks: Chunk[]
-}
-
-// ---- app/services/embeddings/models.py ----
-
-export interface Embedding {
-  embedding_id: string
-  document_id: string
-  chunk_id: string
-  chunk_index: number
-  chunk_text: string
+export interface IndexingJob {
+  id: string
   filename: string
-  page_number: number
-  embedding_model: string
-  vector_dimension: number
-  embedding: number[]
-  created_at: string
-}
-
-export interface EmbeddingResult {
-  total_embeddings: number
-  embedding_model: string
-  vector_dimension: number
-  embeddings: Embedding[]
+  status: IndexingStatus
+  stage: IndexingStage
+  page_count: number | null
+  chunk_count: number
+  error: string | null
 }
 
 // ---- app/services/vectorstore/models.py ----
-
-export interface StoreEmbeddingsResult {
-  stored_vectors: number
-  collection_name: string
-  database_path: string
-}
 
 export interface VectorStoreStatus {
   collection_exists: boolean

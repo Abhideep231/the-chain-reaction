@@ -1,10 +1,9 @@
 """Schemas for the documents (Knowledge Library) endpoints."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
-
-from app.schemas.pdf import PdfParseResult
 
 
 class DocumentSummary(BaseModel):
@@ -38,16 +37,17 @@ class DocumentUploadResponse(BaseModel):
     status: str
 
 
-class DocumentUploadResult(BaseModel):
+class DocumentUploadAccepted(BaseModel):
+    """POST /documents/upload's immediate response — the file is saved
+    and validated, but parsing/chunking/embedding/storing all happen
+    afterward in a background task (see
+    app.services.indexing.indexing_service). Poll
+    GET /documents/{id}/status for progress.
+    """
+
     id: str
     filename: str
-    status: str
-    parse_result: PdfParseResult
-
-
-class ChunkRequest(BaseModel):
-    document_id: str
-    parse_result: PdfParseResult
+    status: Literal["processing"]
 
 
 class RetrievalRequest(BaseModel):

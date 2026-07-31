@@ -5,37 +5,37 @@ aggregated from their stored chunks via the vector store service — see
 api/routes/vectorstore.py for the collection-level status/delete/reset
 endpoints, including the per-document delete the Knowledge Library
 uses. POST /documents remains a placeholder (unrelated legacy schema).
-POST /documents/upload validates and parses an uploaded PDF via the
-parser service. POST /documents/chunk splits an already-parsed
-document into overlapping text chunks via the chunker service. POST
-/documents/embed generates OpenAI embeddings for an already-chunked
-document via the embedding service. POST /documents/store persists an
-EmbeddingResult into ChromaDB via the vector store service. POST
-/documents/retrieve runs semantic similarity search via the retrieval
-service.
+
+POST /documents/upload validates an uploaded PDF, saves it, and
+schedules the rest of the pipeline (parse -> chunk -> embed -> store,
+see app.services.indexing.indexing_service) as a background task —
+the response returns immediately with status "processing". Poll
+GET /documents/{id}/status for progress. Earlier sprints exposed
+parse/chunk/embed/store as separate client-driven endpoints, which
+meant the frontend had to receive and re-upload each stage's full
+output (including every chunk's actual embedding vector) as the next
+stage's input; that round-trip no longer exists.
+
+POST /documents/retrieve runs semantic similarity search via the
+retrieval service.
 """
 
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, status
 
 from app.core.config import get_settings
 from app.core.constants import ALLOWED_PDF_CONTENT_TYPES, PDF_EXTENSION, PDF_MAGIC_BYTES
 from app.core.logging import get_logger
 from app.schemas.documents import (
-    ChunkRequest,
     DocumentListResponse,
     DocumentSummary,
+    DocumentUploadAccepted,
     DocumentUploadRequest,
     DocumentUploadResponse,
-    DocumentUploadResult,
     RetrievalRequest,
 )
-from app.services.chunker.chunker import chunk_document
-from app.services.chunker.exceptions import ChunkingError
-from app.services.chunker.models import ChunkingResult
-from app.services.embeddings.embedding_service import generate_embeddings
 from app.services.embeddings.exceptions import (
     EmbeddingApiError,
     EmbeddingAuthenticationError,
@@ -47,9 +47,8 @@ from app.services.embeddings.exceptions import (
     InvalidModelError,
     MissingApiKeyError,
 )
-from app.services.embeddings.models import EmbeddingResult
-from app.services.parser.exceptions import PdfParsingError
-from app.services.parser.pdf_parser import parse_pdf
+from app.services.indexing.indexing_service import get_indexing_job_store, run_indexing_pipeline
+from app.services.indexing.models import IndexingJob
 from app.services.retrieval.exceptions import (
     EmptyQueryError,
     InvalidTopKError,
@@ -58,8 +57,6 @@ from app.services.retrieval.exceptions import (
 )
 from app.services.retrieval.models import RetrievalResponse
 from app.services.retrieval.retrieval_service import retrieve
-from app.services.vectorstore.exceptions import VectorStoreError
-from app.services.vectorstore.models import StoreEmbeddingsResult
 from app.services.vectorstore.vector_store import get_vector_store_service
 
 # Not underscore-prefixed: api/routes/chat.py's /chat/ask also imports these,
@@ -127,10 +124,10 @@ def upload_document(request: DocumentUploadRequest) -> DocumentUploadResponse:
 
 @router.post(
     "/documents/upload",
-    response_model=DocumentUploadResult,
-    status_code=status.HTTP_201_CREATED,
+    response_model=DocumentUploadAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
 )
-async def upload_pdf(file: UploadFile) -> DocumentUploadResult:
+async def upload_pdf(file: UploadFile, background_tasks: BackgroundTasks) -> DocumentUploadAccepted:
     settings = get_settings()
     filename = file.filename or ""
 
@@ -166,62 +163,28 @@ async def upload_pdf(file: UploadFile) -> DocumentUploadResult:
             "File does not appear to be a valid PDF.",
         )
 
-    try:
-        parse_result = parse_pdf(content, filename)
-    except PdfParsingError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
-
     document_id = str(uuid.uuid4())
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
     (upload_dir / f"{document_id}{PDF_EXTENSION}").write_bytes(content)
 
-    logger.info(
-        "upload completed: id=%s filename=%s pages=%d",
-        document_id,
-        filename,
-        parse_result.metadata.total_pages,
-    )
+    get_indexing_job_store().create(document_id, filename)
+    background_tasks.add_task(run_indexing_pipeline, document_id, filename, content)
 
-    return DocumentUploadResult(
-        id=document_id,
-        filename=filename,
-        status="parsed",
-        parse_result=parse_result,
-    )
+    logger.info("upload accepted: id=%s filename=%s", document_id, filename)
+
+    return DocumentUploadAccepted(id=document_id, filename=filename, status="processing")
 
 
-@router.post("/documents/chunk", response_model=ChunkingResult)
-def chunk_pdf(request: ChunkRequest) -> ChunkingResult:
-    settings = get_settings()
-    try:
-        return chunk_document(
-            request.parse_result,
-            request.document_id,
-            chunk_size=settings.chunk_size,
-            chunk_overlap=settings.chunk_overlap,
+@router.get("/documents/{document_id}/status", response_model=IndexingJob)
+def get_document_status(document_id: str) -> IndexingJob:
+    job = get_indexing_job_store().get(document_id)
+    if job is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"No indexing job found for document '{document_id}'.",
         )
-    except ChunkingError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
-
-
-@router.post("/documents/embed", response_model=EmbeddingResult)
-def embed_chunks(request: ChunkingResult) -> EmbeddingResult:
-    try:
-        return generate_embeddings(request)
-    except EmbeddingError as exc:
-        status_code = EMBEDDING_ERROR_STATUS.get(
-            type(exc), status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-        raise HTTPException(status_code, str(exc)) from exc
-
-
-@router.post("/documents/store", response_model=StoreEmbeddingsResult)
-def store_embeddings(request: EmbeddingResult) -> StoreEmbeddingsResult:
-    try:
-        return get_vector_store_service().store_embeddings(request)
-    except VectorStoreError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    return job
 
 
 @router.post("/documents/retrieve", response_model=RetrievalResponse)
