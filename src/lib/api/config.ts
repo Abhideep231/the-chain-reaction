@@ -12,3 +12,12 @@ export const DEFAULT_TIMEOUT_MS = 30_000
 
 /** Ask AI can take noticeably longer — it waits on retrieval + Claude. */
 export const ASK_AI_TIMEOUT_MS = 60_000
+
+/** A PDF upload's real duration is the raw file transfer itself (up to
+ * the configured max size), not backend processing — the backend now
+ * responds as soon as the file is saved and hands parsing/chunking/
+ * embedding/storing off to a background job. On a slow or congested
+ * connection a large file can take much longer than the default
+ * timeout to simply finish uploading, well before that background job
+ * ever starts. */
+export const UPLOAD_TIMEOUT_MS = 300_000

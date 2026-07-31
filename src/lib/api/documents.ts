@@ -1,4 +1,5 @@
 import { apiClient } from "@/lib/api/client"
+import { UPLOAD_TIMEOUT_MS } from "@/lib/api/config"
 import type {
   DeleteDocumentResult,
   DocumentListResponse,
@@ -34,7 +35,7 @@ export function deleteDocument(documentId: string): Promise<DeleteDocumentResult
 export function uploadPdf(file: File): Promise<DocumentUploadAccepted> {
   const formData = new FormData()
   formData.append("file", file)
-  return apiClient.postForm<DocumentUploadAccepted>("/documents/upload", formData)
+  return apiClient.postForm<DocumentUploadAccepted>("/documents/upload", formData, UPLOAD_TIMEOUT_MS)
 }
 
 /** GET /documents/{id}/status — the real, current state of a document's
