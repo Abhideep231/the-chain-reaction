@@ -35,6 +35,7 @@ from anthropic.types import Message, MessageParam
 
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
+from app.services.analytics.analytics_service import get_analytics_service
 from app.services.calculations.models import ChainSelectionInput, ChainSelectionResult
 from app.services.claude.calculation_prompt_builder import (
     CALCULATION_EXPLANATION_SYSTEM_PROMPT,
@@ -50,12 +51,20 @@ from app.services.claude.exceptions import (
     PromptTooLargeError,
 )
 from app.services.claude.models import AskResponse, Citation
-from app.services.claude.prompt_builder import SYSTEM_PROMPT, build_user_message
+from app.services.claude.prompt_builder import REFUSAL_MESSAGE, SYSTEM_PROMPT, build_user_message
 from app.services.conversation.conversation_service import (
     build_retrieval_query,
     get_conversation_store,
 )
 from app.services.retrieval.retrieval_service import retrieve
+
+# A question with no relevant documents at all (Empty
+# Retrieval, before Claude is even called) is, from a usage-analytics
+# standpoint, the same outcome as Claude's own in-context refusal: the
+# user asked something the knowledge base couldn't answer. This fixed
+# message distinguishes that case in the recent-conversations log from
+# Claude's own REFUSAL_MESSAGE, since no answer was actually generated.
+NO_DOCUMENTS_MESSAGE = "No relevant documents were found for this question."
 
 logger = get_logger(__name__)
 
@@ -192,6 +201,13 @@ def ask(
     logger.info("retrieval completed: results=%d", len(retrieval_response.results))
 
     if not retrieval_response.results:
+        get_analytics_service().record_exchange(
+            question=question,
+            answer=NO_DOCUMENTS_MESSAGE,
+            is_refusal=True,
+            response_time_ms=(time.monotonic() - start) * 1000,
+            document_ids=[],
+        )
         raise EmptyRetrievalError("No relevant document chunks were found for this question.")
 
     client = _resolve_client(client, settings)
@@ -243,6 +259,13 @@ def ask(
     store.append_exchange(resolved_session_id, question, answer)
 
     duration_ms = (time.monotonic() - start) * 1000
+    get_analytics_service().record_exchange(
+        question=question,
+        answer=answer,
+        is_refusal=answer.strip() == REFUSAL_MESSAGE,
+        response_time_ms=duration_ms,
+        document_ids=[result.document_id for result in retrieval_response.results],
+    )
     logger.info(
         "answer generated: session_id=%s question=%r citations=%d confidence=%.4f duration_ms=%.1f",
         resolved_session_id,

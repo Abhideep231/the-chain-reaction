@@ -1,95 +1,57 @@
-import {
-  FileUpIcon,
-  MessageCircleQuestionIcon,
-  RefreshCwIcon,
-} from "lucide-react"
-
-import { ActivityFeed } from "@/components/dashboard/activity-feed"
-import { type ChartBarItem, KnowledgeChart } from "@/components/dashboard/knowledge-chart"
-import { HealthCard } from "@/components/dashboard/health-card"
-import { MetricCard } from "@/components/dashboard/metric-card"
-import { ReferenceTable } from "@/components/dashboard/reference-table"
-import type {
-  CategoryBreakdownItem,
-  DashboardSnapshot,
-  StatusBreakdownItem,
-} from "@/types/dashboard"
-
-function toCategoryBars(items: CategoryBreakdownItem[]): ChartBarItem[] {
-  return items.map((item) => ({
-    label: item.label,
-    value: item.value,
-    colorClassName: `bg-chart-${item.colorSlot}`,
-  }))
-}
-
-function toStatusBars(items: StatusBreakdownItem[]): ChartBarItem[] {
-  return items.map((item) => ({
-    label: item.label,
-    value: item.value,
-    colorClassName: item.status === "good" ? "bg-status-good" : "bg-status-warning",
-  }))
-}
+import { ProductFamilyCoverageCard } from "@/components/dashboard/product-family-coverage-card"
+import { QuickActions } from "@/components/dashboard/quick-actions"
+import { RecentConversationsCard } from "@/components/dashboard/recent-conversations-card"
+import { RecentDocumentsCard } from "@/components/dashboard/recent-documents-card"
+import { StatTile } from "@/components/dashboard/stat-tile"
+import type { DashboardSnapshot } from "@/types/dashboard"
 
 export function DashboardGrid({ snapshot }: { snapshot: DashboardSnapshot }) {
   return (
     <div className="flex flex-col gap-8">
-      <section className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
-        {snapshot.metrics.map((metric) => (
-          <MetricCard key={metric.id} metric={metric} />
-        ))}
-      </section>
+      <QuickActions />
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold">Knowledge Base Health</h2>
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
-          <KnowledgeChart
-            title="Document Types"
-            items={toCategoryBars(snapshot.knowledgeHealth.documentTypes)}
-          />
-          <KnowledgeChart
-            title="Product Families"
-            items={toCategoryBars(snapshot.knowledgeHealth.productFamilies)}
-          />
-          <KnowledgeChart
-            title="Document Status"
-            items={toStatusBars(snapshot.knowledgeHealth.documentStatus)}
-          />
-        </div>
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold">Recent Activity</h2>
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
-          <ActivityFeed
-            title="Recently Indexed Documents"
-            icon={FileUpIcon}
-            items={snapshot.recentlyIndexed}
-          />
-          <ActivityFeed
-            title="Recently Updated Documents"
-            icon={RefreshCwIcon}
-            items={snapshot.recentlyUpdated}
-          />
-          <ActivityFeed
-            title="Recent AI Questions"
-            icon={MessageCircleQuestionIcon}
-            items={snapshot.recentQuestions}
-          />
-        </div>
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <ReferenceTable documents={snapshot.topReferencedDocuments} />
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold">AI System Health</h2>
+        <h2 className="text-sm font-semibold">Knowledge Library Overview</h2>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
-          {snapshot.systemHealth.map((component) => (
-            <HealthCard key={component.id} component={component} />
-          ))}
+          <StatTile
+            label="Total Documents"
+            value={snapshot.overview.totalDocuments.toLocaleString("en-US")}
+          />
+          <StatTile
+            label="Product Families"
+            value={snapshot.overview.productFamilies.toLocaleString("en-US")}
+          />
+          <StatTile label="Last Indexed" value={snapshot.overview.lastIndexed} />
+          <StatTile label="Storage Used" value={snapshot.overview.storageUsed} />
         </div>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-semibold">AI Usage</h2>
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
+          <StatTile
+            label="Questions Asked"
+            value={snapshot.aiUsage.questionsAsked.toLocaleString("en-US")}
+          />
+          <StatTile label="Average Response Time" value={snapshot.aiUsage.averageResponseTime} />
+          <StatTile
+            label="Documents Referenced"
+            value={snapshot.aiUsage.documentsReferenced.toLocaleString("en-US")}
+          />
+          <StatTile
+            label="Successful Answers"
+            value={snapshot.aiUsage.successfulAnswers.toLocaleString("en-US")}
+          />
+        </div>
+      </section>
+
+      <section className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-3">
+        <RecentConversationsCard items={snapshot.recentConversations} />
+        <RecentDocumentsCard items={snapshot.recentDocuments} />
+      </section>
+
+      <section>
+        <ProductFamilyCoverageCard items={snapshot.productFamilyCoverage} />
       </section>
     </div>
   )
