@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 
 from app.core.logging import get_logger
 from app.schemas.pdf import PdfParseResult
-from app.services.chunker.exceptions import EmptyDocumentError, EmptyPageError
+from app.services.chunker.exceptions import EmptyDocumentError
 from app.services.chunker.models import Chunk, ChunkingResult, ChunkMetadata
 
 logger = get_logger(__name__)
@@ -44,9 +44,15 @@ def chunk_document(
 ) -> ChunkingResult:
     """Chunk every page of a parsed document.
 
+    A page with no extractable text (a diagram, a scanned insert, a
+    blank separator — all routine in real multi-page engineering
+    catalogues) is skipped rather than failing the whole document: one
+    image-only page should not discard every other page's real,
+    extractable content.
+
     Raises:
-        EmptyDocumentError: the document has zero pages.
-        EmptyPageError: a page has no extractable text.
+        EmptyDocumentError: the document has zero pages, or none of
+            its pages have any extractable text.
     """
     logger.info(
         "chunking started: document_id=%s pages=%d chunk_size=%d chunk_overlap=%d",
@@ -60,15 +66,23 @@ def chunk_document(
     if not parse_result.pages:
         raise EmptyDocumentError(f"Document '{document_id}' has no pages to chunk.")
 
-    for page in parse_result.pages:
-        if not page.extracted_text.strip():
-            raise EmptyPageError(
-                f"Page {page.page_number} of document '{document_id}' has no extractable text."
-            )
+    text_pages = [page for page in parse_result.pages if page.extracted_text.strip()]
+    skipped_pages = len(parse_result.pages) - len(text_pages)
+    if skipped_pages:
+        logger.warning(
+            "pages skipped: document_id=%s skipped=%d reason=no_extractable_text",
+            document_id,
+            skipped_pages,
+        )
+    if not text_pages:
+        raise EmptyDocumentError(
+            f"Document '{document_id}' has no extractable text on any of its "
+            f"{len(parse_result.pages)} page(s)."
+        )
 
     created_at = datetime.now(UTC)
     chunks: list[Chunk] = []
-    for page in parse_result.pages:
+    for page in text_pages:
         for chunk_text in _chunk_text(page.extracted_text, chunk_size, chunk_overlap):
             chunks.append(
                 Chunk(
