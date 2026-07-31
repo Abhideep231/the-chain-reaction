@@ -1,15 +1,21 @@
 import type {
+  AnalyticsSnapshot,
   AskResponse,
   ChainSelectionInput,
   ChainSelectionResult,
   DocumentListResponse,
   DocumentSummary,
-  VectorStoreStatus,
 } from "@/lib/api/types"
 import type { AdminDocument, KnowledgeStatistics } from "@/types/admin"
 import type { Citation, EngineeringAnswer, RetrievedDocument } from "@/types/chat"
 import type { CalculationInput, CalculationResult } from "@/types/calculation"
-import type { ActivityItem, Metric, StatusBreakdownItem } from "@/types/dashboard"
+import type {
+  AiUsageSummary,
+  KnowledgeOverview,
+  ProductFamilyCoverageItem,
+  RecentConversationItem,
+  RecentDocumentItem,
+} from "@/types/dashboard"
 import type { LibraryDocument } from "@/types/library"
 import type { ConfidenceLevel } from "@/types/shared"
 
@@ -165,53 +171,6 @@ export function adaptCalculationResult(result: ChainSelectionResult): Calculatio
   }
 }
 
-/** No historical time series exists anywhere in the backend (every
- * endpoint reports current state, not a logged trend) — an honest
- * "no comparison available" delta for a metric backed by real current
- * data, rather than a fabricated change figure. */
-const NO_HISTORY_DELTA = { value: "—", direction: "flat", isPositive: true } as const
-
-/** Real count from `GET /documents`'s `total` (Sprint 20/21) — `null`
- * while the request is in flight or has failed, rendered as "—" rather
- * than a stale or invented number. */
-export function adaptTotalDocumentsMetric(
-  documentsResponse: DocumentListResponse | null
-): Metric {
-  return {
-    id: "total-documents",
-    label: "Total Documents",
-    value: documentsResponse ? documentsResponse.total.toLocaleString("en-US") : "—",
-    delta: NO_HISTORY_DELTA,
-  }
-}
-
-/** Real vector count from `GET /vectorstore/status` — one embedded
- * chunk is one indexed passage. */
-export function adaptIndexedPassagesMetric(
-  vectorStoreStatus: VectorStoreStatus | null
-): Metric {
-  return {
-    id: "indexed-passages",
-    label: "Indexed Passages",
-    value: vectorStoreStatus ? vectorStoreStatus.total_vectors.toLocaleString("en-US") : "—",
-    delta: NO_HISTORY_DELTA,
-  }
-}
-
-/** Every document `GET /documents` returns is, by definition, fully
- * indexed (see api/routes/documents.py) — there is no real "draft"
- * concept in the backend, so that bucket is always genuinely 0, not
- * fabricated. */
-export function adaptDocumentStatusBreakdown(
-  documentsResponse: DocumentListResponse | null
-): StatusBreakdownItem[] {
-  if (!documentsResponse) return []
-  return [
-    { label: "Approved", value: documentsResponse.total, status: "good" },
-    { label: "Draft", value: 0, status: "warning" },
-  ]
-}
-
 function formatRelativeTime(isoTimestamp: string): string {
   const diffMinutes = Math.max(0, Math.round((Date.now() - new Date(isoTimestamp).getTime()) / 60_000))
   if (diffMinutes < 1) return "Just now"
@@ -223,36 +182,110 @@ function formatRelativeTime(isoTimestamp: string): string {
   return `${diffDays} days ago`
 }
 
-const RECENTLY_INDEXED_LIMIT = 4
+function totalStorageBytes(documents: DocumentSummary[]): number {
+  return documents.reduce((sum, document) => sum + (document.file_size_bytes ?? 0), 0)
+}
 
-/** The 4 most recently stored real documents, newest first — derived
- * entirely from `GET /documents`'s real `uploaded_at`/`page_count`/
- * `chunk_count` (Sprint 20). A document with no `uploaded_at` (should
- * not happen for anything the backend actually returns) is excluded
- * rather than given a fabricated timestamp. */
-export function adaptRecentlyIndexed(
+function mostRecentlyUploaded(
+  documents: DocumentSummary[]
+): (DocumentSummary & { uploaded_at: string }) | undefined {
+  return documents
+    .filter((document): document is DocumentSummary & { uploaded_at: string } =>
+      Boolean(document.uploaded_at)
+    )
+    .sort((a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime())[0]
+}
+
+/** The backend has no product-family taxonomy for a document (see
+ * `adaptDocumentSummary` above) — every real document currently falls
+ * into this same placeholder bucket, the exact one already shown
+ * elsewhere (Knowledge Library, Admin). Not fabricated: an honest
+ * reflection of what the backend tracks today. Once it gains real
+ * per-document categories, this becomes a genuine multi-category
+ * breakdown with no change needed at either call site below. */
+const PLACEHOLDER_PRODUCT_FAMILY = "General"
+
+/** Knowledge Library Overview's four real stat tiles, derived entirely
+ * from `GET /documents`. */
+export function adaptKnowledgeOverview(
   documentsResponse: DocumentListResponse | null
-): ActivityItem[] {
+): KnowledgeOverview {
+  const documents = documentsResponse?.documents ?? []
+  const lastIndexedDocument = mostRecentlyUploaded(documents)
+
+  return {
+    totalDocuments: documentsResponse?.total ?? 0,
+    productFamilies: documents.length > 0 ? 1 : 0,
+    lastIndexed: lastIndexedDocument ? formatRelativeTime(lastIndexedDocument.uploaded_at) : "—",
+    storageUsed: formatFileSize(totalStorageBytes(documents)),
+  }
+}
+
+const RECENT_DOCUMENTS_LIMIT = 5
+
+/** The most recently uploaded real documents, newest first — same
+ * source and ordering as the Knowledge Library and Admin's document
+ * tables. */
+export function adaptRecentDocuments(
+  documentsResponse: DocumentListResponse | null
+): RecentDocumentItem[] {
   if (!documentsResponse) return []
   return documentsResponse.documents
     .filter((document): document is DocumentSummary & { uploaded_at: string } =>
       Boolean(document.uploaded_at)
     )
-    .sort(
-      (a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime()
-    )
-    .slice(0, RECENTLY_INDEXED_LIMIT)
-    .map((document) => {
-      const pageCount = document.page_count ?? 0
-      return {
-        id: document.id,
-        title: document.filename,
-        subtitle: `${pageCount} page${pageCount === 1 ? "" : "s"} · ${
-          document.chunk_count
-        } passage${document.chunk_count === 1 ? "" : "s"}`,
-        timestamp: formatRelativeTime(document.uploaded_at),
-      }
-    })
+    .sort((a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime())
+    .slice(0, RECENT_DOCUMENTS_LIMIT)
+    .map((document) => ({
+      id: document.id,
+      name: document.filename,
+      uploadedAt: formatRelativeTime(document.uploaded_at),
+      chunkCount: document.chunk_count,
+    }))
+}
+
+/** Real documents grouped by product family — see
+ * `PLACEHOLDER_PRODUCT_FAMILY` above for why this is currently always
+ * a single bucket rather than a fabricated multi-category split. */
+export function adaptProductFamilyCoverage(
+  documentsResponse: DocumentListResponse | null
+): ProductFamilyCoverageItem[] {
+  const total = documentsResponse?.total ?? 0
+  if (total === 0) return []
+  return [{ label: PLACEHOLDER_PRODUCT_FAMILY, documentCount: total, percentage: 100 }]
+}
+
+function formatResponseTime(averageMs: number | null): string {
+  if (averageMs === null) return "—"
+  return `${(averageMs / 1000).toFixed(1)}s`
+}
+
+/** AI Usage's four real stat tiles, derived entirely from
+ * `GET /dashboard/analytics` — in-memory since the backend last
+ * restarted (see app/services/analytics/analytics_service.py), never
+ * fabricated. A backend that has never answered a question reports
+ * genuine zeros here, not placeholder numbers. */
+export function adaptAiUsageSummary(analytics: AnalyticsSnapshot | null): AiUsageSummary {
+  return {
+    questionsAsked: analytics?.total_questions ?? 0,
+    averageResponseTime: formatResponseTime(analytics?.average_response_time_ms ?? null),
+    documentsReferenced: analytics?.documents_referenced ?? 0,
+    successfulAnswers: analytics?.successful_answers ?? 0,
+  }
+}
+
+/** The most recent real Ask AI exchanges — already newest-first from
+ * the backend. */
+export function adaptRecentConversations(
+  analytics: AnalyticsSnapshot | null
+): RecentConversationItem[] {
+  if (!analytics) return []
+  return analytics.recent_conversations.map((exchange) => ({
+    id: exchange.id,
+    question: exchange.question,
+    status: exchange.status,
+    timestamp: formatRelativeTime(exchange.timestamp),
+  }))
 }
 
 /** Maps `GET /documents`'s real document list onto the Admin page's

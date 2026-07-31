@@ -6,6 +6,15 @@ shaping retrieved chunks into the context block Claude reads.
 
 from app.services.retrieval.models import RetrievalResult
 
+# The exact sentence Claude is instructed to answer with when the supplied
+# context is insufficient — pulled out as a constant (rather than inlined
+# only in SYSTEM_PROMPT below) so app.services.analytics can reliably tell
+# a genuine content refusal apart from a real answer by exact string
+# comparison, without duplicating the wording.
+REFUSAL_MESSAGE = (
+    "The uploaded documents do not contain enough information to answer this question."
+)
+
 SYSTEM_PROMPT = (
     "You are a technical assistant for The Chain Reaction, an engineering "
     "document intelligence platform. Answer the user's question using ONLY "
@@ -18,8 +27,7 @@ SYSTEM_PROMPT = (
     "explicitly stated in the context.\n"
     "- If the supplied context does not contain enough information to "
     "answer the question, respond with exactly this sentence and nothing "
-    "else: \"The uploaded documents do not contain enough information to "
-    "answer this question.\"\n"
+    f'else: "{REFUSAL_MESSAGE}"\n'
     "- Always remain technical and precise."
 )
 

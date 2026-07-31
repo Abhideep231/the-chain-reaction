@@ -262,3 +262,26 @@ export interface CalculationResponse {
   result: ChainSelectionResult
   explanation: string | null
 }
+
+// ---- app/services/analytics/models.py ----
+
+export type ExchangeStatus = "answered" | "refused"
+
+export interface ConversationExchange {
+  id: string
+  question: string
+  answer: string
+  status: ExchangeStatus
+  response_time_ms: number
+  documents_referenced: number
+  timestamp: string
+}
+
+export interface AnalyticsSnapshot {
+  total_questions: number
+  successful_answers: number
+  refused_answers: number
+  average_response_time_ms: number | null
+  documents_referenced: number
+  recent_conversations: ConversationExchange[]
+}

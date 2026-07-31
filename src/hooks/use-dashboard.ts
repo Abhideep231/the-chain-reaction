@@ -3,115 +3,61 @@
 import * as React from "react"
 
 import {
-  adaptDocumentStatusBreakdown,
-  adaptIndexedPassagesMetric,
-  adaptRecentlyIndexed,
-  adaptTotalDocumentsMetric,
+  adaptAiUsageSummary,
+  adaptKnowledgeOverview,
+  adaptProductFamilyCoverage,
+  adaptRecentConversations,
+  adaptRecentDocuments,
 } from "@/lib/api/adapters"
-import { getVectorStoreStatus } from "@/lib/api/admin"
+import { getDashboardAnalytics } from "@/lib/api/dashboard"
 import { listDocuments } from "@/lib/api/documents"
-import type { DocumentListResponse, VectorStoreStatus } from "@/lib/api/types"
-import { getDashboardSnapshot } from "@/lib/dashboard-mock"
-import type { SystemComponentStatus, TimeRange } from "@/types/dashboard"
+import type { AnalyticsSnapshot, DocumentListResponse } from "@/lib/api/types"
+import type { DashboardSnapshot } from "@/types/dashboard"
 
+/** Every field on the Dashboard is real, sourced from `GET /documents`
+ * and `GET /dashboard/analytics` — there is no mock fallback left to
+ * fall back to. A request that fails leaves its half of the snapshot
+ * at `null`, which the adapters below render as honest zeros/empty
+ * lists rather than stale or invented data. */
 export function useDashboard() {
-  const [range, setRange] = React.useState<TimeRange>("7d")
-
-  // Sprint 21: everything genuinely derivable from a real endpoint is
-  // real — total documents and indexed passages (GET /documents,
-  // GET /vectorstore/status), the document status breakdown and
-  // recently-indexed feed (both from GET /documents), and the
-  // ChromaDB system-health tile (GET /vectorstore/status, real since
-  // Sprint 16). Everything else on this dashboard (the other 4 KPIs,
-  // the document-type/product-family breakdowns, "Recently Updated",
-  // "Recent AI Questions", "Top Referenced Documents", and the other 4
-  // system-health tiles) has no backing endpoint anywhere in the
-  // backend — none of it is a logged/aggregated statistic anywhere,
-  // only ever computed fresh per-request — so it stays on the Sprint 5
-  // mock, per the "don't invent data" rule, clearly isolated here by
-  // only ever touching the specific snapshot fields listed above.
   const [documentsResponse, setDocumentsResponse] =
     React.useState<DocumentListResponse | null>(null)
-  const [vectorStoreStatus, setVectorStoreStatus] =
-    React.useState<VectorStoreStatus | null>(null)
+  const [analytics, setAnalytics] = React.useState<AnalyticsSnapshot | null>(null)
+  const [isLoading, setIsLoading] = React.useState(true)
 
-  React.useEffect(() => {
+  const load = React.useCallback(() => {
+    setIsLoading(true)
     let cancelled = false
 
-    listDocuments()
-      .then((response) => {
-        if (!cancelled) setDocumentsResponse(response)
-      })
-      .catch(() => {
-        // Left null — the derived fields render their own honest
-        // "unavailable" fallback rather than stale or invented values.
-      })
-
-    getVectorStoreStatus()
-      .then((status) => {
-        if (!cancelled) setVectorStoreStatus(status)
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setVectorStoreStatus({
-            collection_exists: false,
-            collection_name: "",
-            total_vectors: 0,
-            embedding_model: null,
-            vector_dimension: null,
-            database_path: "",
-            health: "unhealthy",
-          })
-        }
-      })
+    Promise.allSettled([listDocuments(), getDashboardAnalytics()]).then((results) => {
+      if (cancelled) return
+      const [documentsResult, analyticsResult] = results
+      setDocumentsResponse(documentsResult.status === "fulfilled" ? documentsResult.value : null)
+      setAnalytics(analyticsResult.status === "fulfilled" ? analyticsResult.value : null)
+      setIsLoading(false)
+    })
 
     return () => {
       cancelled = true
     }
   }, [])
 
-  const snapshot = React.useMemo(() => {
-    const base = getDashboardSnapshot(range)
+  React.useEffect(() => load(), [load])
 
-    const chromaStatus: SystemComponentStatus =
-      vectorStoreStatus?.health === "ok" ? "operational" : "down"
-    const chromaMetricValue = vectorStoreStatus
-      ? vectorStoreStatus.collection_exists
-        ? `${vectorStoreStatus.total_vectors.toLocaleString("en-US")} vector${
-            vectorStoreStatus.total_vectors === 1 ? "" : "s"
-          }`
-        : "No collection yet"
-      : undefined
-
-    return {
-      ...base,
-      metrics: base.metrics.map((metric) => {
-        if (metric.id === "total-documents") return adaptTotalDocumentsMetric(documentsResponse)
-        if (metric.id === "indexed-passages") return adaptIndexedPassagesMetric(vectorStoreStatus)
-        return metric
-      }),
-      knowledgeHealth: {
-        ...base.knowledgeHealth,
-        documentStatus: adaptDocumentStatusBreakdown(documentsResponse),
-      },
-      recentlyIndexed: adaptRecentlyIndexed(documentsResponse),
-      systemHealth: base.systemHealth.map((service) =>
-        service.id === "chromadb" && chromaMetricValue
-          ? {
-              ...service,
-              status: chromaStatus,
-              metricLabel: "Total vectors",
-              metricValue: chromaMetricValue,
-              lastChecked: "Just now",
-            }
-          : service
-      ),
-    }
-  }, [range, documentsResponse, vectorStoreStatus])
+  const snapshot: DashboardSnapshot = React.useMemo(
+    () => ({
+      overview: adaptKnowledgeOverview(documentsResponse),
+      aiUsage: adaptAiUsageSummary(analytics),
+      recentConversations: adaptRecentConversations(analytics),
+      recentDocuments: adaptRecentDocuments(documentsResponse),
+      productFamilyCoverage: adaptProductFamilyCoverage(documentsResponse),
+    }),
+    [documentsResponse, analytics]
+  )
 
   return {
-    range,
-    setRange,
     snapshot,
+    isLoading,
+    refresh: load,
   }
 }
