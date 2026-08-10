@@ -4,7 +4,12 @@ import * as React from "react"
 
 import { adaptAdminDocumentCounts, adaptAdminDocuments } from "@/lib/api/adapters"
 import { getAdminStatus, getVectorStoreStatus } from "@/lib/api/admin"
-import { getDocumentStatus, listDocuments, uploadPdf } from "@/lib/api/documents"
+import {
+  deleteDocument as requestDeleteDocument,
+  getDocumentStatus,
+  listDocuments,
+  uploadPdf,
+} from "@/lib/api/documents"
 import { friendlyErrorMessage } from "@/lib/api/errors"
 import {
   initialActivity,
@@ -55,6 +60,18 @@ export function useAdmin() {
   const [statistics, setStatistics] = React.useState(initialStatistics)
   const [activity, setActivity] = React.useState(initialActivity)
   const [upload, setUpload] = React.useState<UploadProgress | null>(null)
+  const [deletingId, setDeletingId] = React.useState<string | null>(null)
+  const [documentsError, setDocumentsError] = React.useState<string | null>(null)
+
+  // Mirrors use-library.ts's isMountedRef pattern — guards state updates
+  // from a fetch that resolves after this hook's owner has unmounted.
+  const isMountedRef = React.useRef(true)
+  React.useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   // The five services below (claude-api, embedding-service, parser,
   // chunking-engine, retrieval-engine) have no dedicated health-check
@@ -110,12 +127,14 @@ export function useAdmin() {
     }
   }, [])
 
-  React.useEffect(() => {
-    let cancelled = false
-
-    listDocuments()
+  // Shared by the initial load and the post-delete refresh below — one
+  // fetch implementation, matching the real GET /documents Knowledge
+  // Library uses, so Admin's table is never left showing a row the
+  // backend no longer has.
+  const loadDocuments = React.useCallback(() => {
+    return listDocuments()
       .then((response) => {
-        if (cancelled) return
+        if (!isMountedRef.current) return
         setDocuments(adaptAdminDocuments(response))
         setStatistics((prev) => ({ ...prev, ...adaptAdminDocumentCounts(response) }))
       })
@@ -123,11 +142,35 @@ export function useAdmin() {
         // Left empty — the table's own empty state renders honestly
         // rather than showing stale or invented documents.
       })
-
-    return () => {
-      cancelled = true
-    }
   }, [])
+
+  React.useEffect(() => {
+    loadDocuments()
+  }, [loadDocuments])
+
+  // Same shared DELETE /vectorstore/document/{id} call the Knowledge
+  // Library's useLibrary().deleteDocument uses (src/lib/api/documents.ts)
+  // — no parallel request, no new endpoint. On success, re-fetches the
+  // real document list (loadDocuments) rather than locally removing the
+  // row, so Admin's list and stats never drift from the backend. On
+  // failure, nothing is removed from the UI and the error is surfaced via
+  // the same friendlyErrorMessage() every other API call in this app uses.
+  const deleteDocument = React.useCallback(
+    (id: string) => {
+      setDeletingId(id)
+      setDocumentsError(null)
+      return requestDeleteDocument(id)
+        .then(() => loadDocuments())
+        .catch((caught: unknown) => {
+          if (!isMountedRef.current) return
+          setDocumentsError(friendlyErrorMessage(caught))
+        })
+        .finally(() => {
+          if (isMountedRef.current) setDeletingId(null)
+        })
+    },
+    [loadDocuments]
+  )
 
   const startUpload = React.useCallback(async (file: File) => {
     const fileName = file.name
@@ -240,5 +283,8 @@ export function useAdmin() {
     upload,
     startUpload,
     dismissUpload,
+    deletingId,
+    documentsError,
+    deleteDocument,
   }
 }
