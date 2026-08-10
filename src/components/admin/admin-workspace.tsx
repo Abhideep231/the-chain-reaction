@@ -22,6 +22,9 @@ export function AdminWorkspace() {
     summary,
     upload,
     startUpload,
+    deletingId,
+    documentsError,
+    deleteDocument,
   } = useAdmin()
 
   const panelContent = React.useMemo(
@@ -47,7 +50,12 @@ export function AdminWorkspace() {
             Showing {documents.length} of {statistics.totalDocuments} documents
           </span>
         </div>
-        <DocumentTable documents={documents} />
+        <DocumentTable
+          documents={documents}
+          onDeleteDocument={deleteDocument}
+          deletingId={deletingId}
+          documentsError={documentsError}
+        />
       </section>
 
       <section className="flex flex-col gap-3">
