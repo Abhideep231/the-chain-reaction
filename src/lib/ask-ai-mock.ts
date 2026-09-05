@@ -7,11 +7,26 @@ import type { EngineeringAnswer, RetrievedDocument } from "@/types/chat"
  * suggested prompt, plus a generic fallback for freeform questions.
  */
 
+// Validated against the actual indexed iwis documentation (not invented):
+// each question was checked against the real extracted/chunked text of
+// the source PDF before being added here — see the validation notes in
+// the PR/commit this change shipped in for the exact chunk each one is
+// grounded in.
 export const suggestedPrompts: string[] = [
-  "What is the maximum allowable elongation for an ANSI 60 roller chain before replacement?",
-  "Why is my conveyor chain wearing prematurely at the sprocket mesh?",
-  "Compare the tensile strength of ISO 10B-1 and ANSI 80 roller chains.",
-  "What lubrication interval is recommended for a chain running at 900 RPM in a dusty environment?",
+  // Engineering / selection — iwis Handbook for Chain Engineering, "Layout
+  // of chain drives" (pre-selection factors f1-f6 and worked example).
+  "How should I select the right roller chain for a power transmission drive?",
+  // Maintenance / wear — iwis Handbook, "Wear resistance" (max. 2% chain
+  // elongation / 15,000 operating hours at optimum conditions) and
+  // "Chain tensioners" (re-tensioning to stay within that 2% limit).
+  "How much wear elongation can a roller chain tolerate before it needs replacing?",
+  // Product knowledge — iwis b.dry maintenance-free Stainless Steel Chains
+  // datasheet (dry-running, FDA-compliant polymer bush, no relubrication).
+  "What are the advantages of iwis b.dry maintenance-free, dry-running stainless steel chains?",
+  // Sprocket / drive system — iwis Handbook, "Chain wheels" (material
+  // choice by tooth count/speed/torque; the chunk itself uses the word
+  // "sprocket" alongside "chain wheel").
+  "What factors determine the correct material choice for a chain sprocket?",
 ]
 
 const documentLibrary: Record<string, RetrievedDocument> = {
