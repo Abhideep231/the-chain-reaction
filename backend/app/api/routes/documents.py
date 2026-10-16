@@ -163,6 +163,14 @@ async def upload_pdf(file: UploadFile, background_tasks: BackgroundTasks) -> Doc
             "File does not appear to be a valid PDF.",
         )
 
+    return accept_pdf(content, filename, background_tasks)
+
+
+def accept_pdf(
+    content: bytes, filename: str, background_tasks: BackgroundTasks
+) -> DocumentUploadAccepted:
+    """Persist a validated, complete upload and start the existing indexing job."""
+    settings = get_settings()
     document_id = str(uuid.uuid4())
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)

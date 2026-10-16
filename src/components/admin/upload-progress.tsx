@@ -48,6 +48,8 @@ export function UploadProgress({ upload }: { upload: UploadProgressData }) {
             <li key={stage} className="flex items-center gap-2.5 text-sm">
               {isStageComplete || (isCurrent && isComplete) ? (
                 <CheckCircle2Icon className="size-4 shrink-0 text-status-good" />
+              ) : isCurrent && upload.error ? (
+                <AlertTriangleIcon className="size-4 shrink-0 text-status-critical" />
               ) : isCurrent ? (
                 <LoaderCircleIcon className="size-4 shrink-0 animate-spin text-primary" />
               ) : (

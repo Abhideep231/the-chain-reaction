@@ -11,7 +11,16 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import admin, calculations, chat, dashboard, documents, health, vectorstore
+from app.api.routes import (
+    admin,
+    calculations,
+    chat,
+    chunked_upload,
+    dashboard,
+    documents,
+    health,
+    vectorstore,
+)
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 
@@ -72,6 +81,7 @@ def get_docs() -> HTMLResponse:
 app.include_router(health.router)
 app.include_router(chat.router)
 app.include_router(documents.router)
+app.include_router(chunked_upload.router)
 app.include_router(calculations.router)
 app.include_router(admin.router)
 app.include_router(vectorstore.router)

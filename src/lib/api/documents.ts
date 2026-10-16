@@ -1,3 +1,4 @@
+import { ApiError } from "@/lib/api/errors"
 import { apiClient } from "@/lib/api/client"
 import { UPLOAD_TIMEOUT_MS } from "@/lib/api/config"
 import type {
@@ -24,7 +25,10 @@ export function deleteDocument(documentId: string): Promise<DeleteDocumentResult
   )
 }
 
-/** POST /documents/upload — validates and saves the PDF, then returns
+const CHUNK_BYTES = 1024 * 1024
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+/** Upload a PDF — validates and saves the PDF, then returns
  * immediately with status "processing". Parsing, chunking, embedding,
  * and storing all happen afterward in a backend background job — poll
  * `getDocumentStatus` for progress rather than driving those stages
@@ -32,7 +36,31 @@ export function deleteDocument(documentId: string): Promise<DeleteDocumentResult
  * chunk's full text, and every embedding's actual vector, through the
  * browser between separate /documents/chunk, /documents/embed, and
  * /documents/store calls). */
-export function uploadPdf(file: File): Promise<DocumentUploadAccepted> {
+export async function uploadPdf(file: File): Promise<DocumentUploadAccepted> {
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new ApiError("File exceeds the 25 MB limit.", "validation", 413)
+  }
+  // Keep each request below forwarded-port/proxy body limits. The backend
+  // reassembles the original bytes before starting its indexing pipeline.
+  if (file.size > CHUNK_BYTES) {
+    const uploadId = crypto.randomUUID()
+    const chunkCount = Math.ceil(file.size / CHUNK_BYTES)
+    for (let index = 0; index < chunkCount; index++) {
+      const form = new FormData()
+      form.append("file", file.slice(index * CHUNK_BYTES, (index + 1) * CHUNK_BYTES), file.name)
+      form.append("upload_id", uploadId)
+      form.append("chunk_index", String(index))
+      form.append("total_size", String(file.size))
+      const result = await apiClient.postForm<DocumentUploadAccepted | { status: "uploading" }>(
+        "/documents/upload-chunk", form, UPLOAD_TIMEOUT_MS
+      )
+      if (index === chunkCount - 1) {
+        if (result.status !== "processing") throw new Error("Upload did not complete.")
+        return result
+      }
+    }
+    throw new Error("Upload did not complete.")
+  }
   const formData = new FormData()
   formData.append("file", file)
   return apiClient.postForm<DocumentUploadAccepted>("/documents/upload", formData, UPLOAD_TIMEOUT_MS)

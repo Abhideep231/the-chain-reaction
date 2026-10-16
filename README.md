@@ -218,6 +218,28 @@ store it in ChromaDB. Use the frontend's Admin page to upload, which runs
 the full upload → chunk → embed → store pipeline automatically. Ask AI has
 nothing to answer from until all four steps complete.
 
+### Large catalogue uploads
+
+The Admin uploader sends files larger than 1 MiB as ordered 1 MiB parts
+through `/documents/upload-chunk`. The backend reassembles the original PDF
+before starting parsing and indexing; the 25 MiB total-file limit still applies.
+This keeps individual requests small enough for forwarded-port proxy limits.
+Incomplete uploads expire after 30 minutes of inactivity (cleaned up on the
+next upload request). Interrupted uploads must be started again; in-flight
+upload sessions use the current single backend process and do not survive a
+restart. Finished PDFs remain in the configured upload storage.
+
+After updating an existing Docker/Codespaces installation, rebuild **both**
+services with `docker compose up -d --build`, then refresh the browser. A
+frontend-only update cannot use the new backend upload endpoint.
+
+Upload regression checks (no provider keys or API calls required):
+
+```bash
+node --test tests/upload.test.mjs
+(cd backend && .venv/bin/python -m unittest discover -s tests)
+```
+
 ## CI
 
 `.github/workflows/ci.yml` runs on every push and pull request:
