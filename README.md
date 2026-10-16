@@ -240,6 +240,37 @@ node --test tests/upload.test.mjs
 (cd backend && .venv/bin/python -m unittest discover -s tests)
 ```
 
+### Catalogue table extraction and answers
+
+Recognised PDF tables are indexed as complete rows with their original column
+labels, units, page context, section and PDF page number. Slanted headers are
+mapped by baseline position. Ordinary prose still uses overlapping chunks.
+`16B-1`, `16 B-1` and Unicode dash variants also trigger literal designation
+search alongside semantic retrieval; comparisons reserve matches for each code.
+Similarity scores remain actual cosine scores, not fabricated exact-match confidence.
+Answers render GitHub-flavoured Markdown tables with horizontal scrolling.
+
+**Existing documents must be re-indexed** to gain structured rows. In the current
+UI, remove the old document and upload the original PDF again after deploying
+both services. Keep a copy of the source PDF first. Existing embeddings do not
+change automatically. Re-indexing calls the configured embedding provider and
+can incur its normal usage cost.
+
+This extractor does not perform OCR. Unresolved layouts keep their original
+plain text rather than receiving guessed labels. JWIS pages 16, 22, 26 and 57
+have golden row checks; page 44's fragmented cell layout currently falls back
+to plain text. Extraction success is not proof of a correct generated answer:
+verify answers against page citations, especially across catalogue variants.
+
+Regression checks:
+
+```bash
+node --test tests/*.test.mjs
+(cd backend && .venv/bin/python -m unittest discover -s tests)
+# Include original-catalogue golden checks using a local copy (not committed):
+(cd backend && CHAIN_CATALOGUE_PDF=/absolute/path/to/JWIS-catalog-precision-chains-iwis.pdf .venv/bin/python -m unittest discover -s tests)
+```
+
 ## CI
 
 `.github/workflows/ci.yml` runs on every push and pull request:

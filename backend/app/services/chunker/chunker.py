@@ -1,7 +1,8 @@
 """Recursive text chunking service — the single source of document
 chunking for the RAG pipeline.
 
-Splits each page's extracted text into overlapping chunks, preferring
+Keeps recognised table rows atomic with repeated headers and source context.
+Splits each page's narrative text into overlapping chunks, preferring
 to break on paragraph boundaries, then sentence boundaries, then word
 boundaries, falling back to a hard character split only if a single
 "word" is itself longer than the target chunk size. Splitting is
@@ -83,7 +84,11 @@ def chunk_document(
     created_at = datetime.now(UTC)
     chunks: list[Chunk] = []
     for page in text_pages:
-        for chunk_text in _chunk_text(page.extracted_text, chunk_size, chunk_overlap):
+        narrative = page.narrative_text if page.narrative_text is not None else page.extracted_text
+        # Table rows remain atomic even when longer than the prose chunk target.
+        # Repeating their headers/context prevents numbers losing their meaning.
+        texts = _chunk_text(narrative, chunk_size, chunk_overlap) if narrative.strip() else []
+        for chunk_text in [*texts, *page.table_rows]:
             chunks.append(
                 Chunk(
                     chunk_id=str(uuid.uuid4()),

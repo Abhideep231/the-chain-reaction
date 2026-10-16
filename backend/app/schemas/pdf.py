@@ -1,6 +1,6 @@
 """Schemas describing the structured output of PDF parsing."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PdfMetadata(BaseModel):
@@ -20,6 +20,8 @@ class PdfPageContent(BaseModel):
     extracted_text: str
     character_count: int
     word_count: int
+    table_rows: list[str] = Field(default_factory=list)
+    narrative_text: str | None = None
 
 
 class PdfParseResult(BaseModel):

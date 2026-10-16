@@ -3,6 +3,7 @@
 import * as React from "react"
 import { ChevronDownIcon } from "lucide-react"
 
+import { AnswerMarkdown } from "@/components/chat/answer-markdown"
 import { CitationCard } from "@/components/chat/citation-card"
 import { ConfidenceIndicator } from "@/components/shared/confidence-indicator"
 import { KeyValueList } from "@/components/shared/key-value-list"
@@ -19,9 +20,7 @@ export function AnswerCard({ answer }: { answer: EngineeringAnswer }) {
         <ConfidenceIndicator confidence={answer.confidence} />
       </div>
 
-      <p className="whitespace-pre-line text-sm leading-relaxed text-foreground">
-        {answer.summary}
-      </p>
+      <AnswerMarkdown text={answer.summary} />
 
       {answer.parameters && answer.parameters.length > 0 && (
         <KeyValueList items={answer.parameters} />

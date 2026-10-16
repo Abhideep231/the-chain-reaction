@@ -17,6 +17,7 @@ from app.services.parser.exceptions import (
     EmptyPdfError,
     EncryptedPdfError,
 )
+from app.services.parser.tables import extract_table_rows
 
 logger = get_logger(__name__)
 
@@ -80,8 +81,16 @@ def _extract_metadata(document: fitz.Document, filename: str) -> PdfMetadata:
 def _extract_page(document: fitz.Document, index: int) -> PdfPageContent:
     page = document.load_page(index)
     text: str = page.get_text("text") or ""
+    try:
+        table_rows, narrative = extract_table_rows(page)
+    except Exception:
+        # Keep legacy text available when a malformed layout defeats detection.
+        logger.warning("table extraction unavailable: page=%d", index + 1, exc_info=True)
+        table_rows, narrative = [], None
     return PdfPageContent(
         page_number=index + 1,
+        table_rows=table_rows,
+        narrative_text=narrative,
         extracted_text=text,
         character_count=len(text),
         word_count=len(text.split()),

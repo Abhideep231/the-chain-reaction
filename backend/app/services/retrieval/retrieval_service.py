@@ -1,4 +1,4 @@
-"""Semantic retrieval service — the single source of similarity search
+"""Hybrid retrieval service — literal designation matching plus similarity search
 for the RAG pipeline.
 
     Embedding Vector -> ChromaDB -> Similarity Search -> Top-K Results
@@ -14,6 +14,7 @@ import time
 
 from app.core.logging import get_logger
 from app.services.embeddings.embedding_service import generate_query_embedding
+from app.services.retrieval.designations import designation_patterns
 from app.services.retrieval.exceptions import (
     EmptyQueryError,
     InvalidTopKError,
@@ -69,7 +70,12 @@ def retrieve(
 
     logger.info("vector search started: top_k=%d", resolved_top_k)
     try:
-        matches = get_vector_store_service().query_similar(query_embedding, resolved_top_k)
+        service = get_vector_store_service()
+        matches = service.query_similar(query_embedding, resolved_top_k)
+        exact_groups = [
+            service.query_similar(query_embedding, resolved_top_k, designation=pattern)
+            for pattern in designation_patterns(query)
+        ]
     except Exception as exc:
         logger.warning("retrieval failed: reason=vector_store_error error=%s", exc)
         raise VectorStoreUnavailableError(f"Vector store query failed: {exc}") from exc
@@ -79,6 +85,25 @@ def retrieve(
     if similarity_threshold is not None:
         matches = [match for match in matches if match.similarity_score >= similarity_threshold]
 
+    # Reserve results for each requested designation before filling with semantic
+    # neighbours. Keep real cosine scores: an exact code is not 100% confidence.
+    selected = []
+    seen: set[str] = set()
+    for rank in range(resolved_top_k):
+        for group in exact_groups:
+            if rank >= len(group):
+                continue
+            match = group[rank]
+            if similarity_threshold is not None and match.similarity_score < similarity_threshold:
+                continue
+            if match.chunk_id not in seen:
+                selected.append(match)
+                seen.add(match.chunk_id)
+    for match in matches:
+        if match.chunk_id not in seen:
+            selected.append(match)
+            seen.add(match.chunk_id)
+    matches = selected[:resolved_top_k]
     logger.info("matches found: count=%d", len(matches))
 
     results = [

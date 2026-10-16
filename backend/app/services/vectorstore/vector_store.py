@@ -268,7 +268,9 @@ class VectorStoreService:
             health=self.health_check(),
         )
 
-    def query_similar(self, query_embedding: Sequence[float], top_k: int) -> list[QueryMatch]:
+    def query_similar(
+        self, query_embedding: Sequence[float], top_k: int, designation: str | None = None
+    ) -> list[QueryMatch]:
         """Return up to `top_k` nearest-neighbor matches for
         `query_embedding`, ordered most similar first.
 
@@ -285,6 +287,7 @@ class VectorStoreService:
         query_vector: list[Sequence[float]] = [list(query_embedding)]
         result = collection.query(
             query_embeddings=query_vector,
+            where_document={"$regex": designation} if designation else None,
             n_results=top_k,
             include=["metadatas", "documents", "distances"],
         )
